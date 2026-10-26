@@ -2,10 +2,15 @@
 
 Code review in Neovim, for **your AI agent's changes** and for **GitHub pull requests**.
 
+![critique.nvim with Claude Code](demo/agent.gif)
+
+**[▸ Review your AI agent's work](#review-your-ai-agents-changes)** &nbsp;·&nbsp; **[▸ Review GitHub pull requests](#review-github-pull-requests)**
+
 - **Review your agent's work like a pull request.** The agent hands you its changes as a review.
   You comment on lines in Neovim, the agent answers in the same threads, fixes things, and hands it
   back. It works with Claude Code, Codex, Cursor, and any other agent that can run shell commands.
   Everything stays on your machine.
+- **Or go live:** the agent picks up each comment as you save it and starts on it right away.
 - **Review GitHub PRs inside a real checkout.** You get a GitHub-style diff on the real files, while
   your LSP, telescope, and `gd` keep working. Comments sync to GitHub as you write them.
 
@@ -26,6 +31,8 @@ Code review in Neovim, for **your AI agent's changes** and for **GitHub pull req
 **Reviewing your AI agent**
 - A turn-based loop: the agent submits, you review and submit, the agent fixes and answers, repeat.
   The agent can also review *your* changes.
+- **Live mode:** the agent picks up each comment as you save it (after you pause typing), shows ⏳ on the
+  thread it's working on, and its replies appear as it writes them. Opt in per review.
 - Works with any agent that can run shell commands. A skill teaches Claude Code, Codex, Cursor, and
   others the loop, and the CLI's output is written for agents to read (`--json` too).
 - Neovim refreshes and tells you when the agent submits or closes the review. Threads follow their
@@ -61,6 +68,20 @@ Code review in Neovim, for **your AI agent's changes** and for **GitHub pull req
 It works the other way round too: ask the agent to review *your* changes with critique, and its
 comments show up in Neovim. Reviews live in `.critique/` inside the repo, which git ignores, and
 never touch GitHub.
+
+### Live reviews: the agent reacts as you comment
+
+Normally the agent waits until you `:Critique submit`. In a **live** review, each comment goes to the
+agent when you save it, and it gets to work right away:
+
+- It waits until you've paused for about 20 seconds, so it doesn't start on a comment you're still writing.
+- The thread it's working on shows `⏳ claude is on it`, and Neovim tells you when it replies or resolves.
+- `:Critique submit` is optional; use it to say "that's all for now".
+
+**Setup: none beyond the skill.** Ask for it ("…hand it to me for review in critique, live"), or turn
+it on yourself in an open review with `:Critique live` (run it again to turn it off). Agents that can
+run commands in the background (Claude Code) react even while they're busy with something else; other
+agents react as soon as they finish their current step.
 
 ### Set up your agent (once)
 
@@ -98,8 +119,8 @@ set, quote a handle that has `#`: `critique 'cart-minimum-3f9a#3'`.
 agent's changes. Agents sharing one checkout can limit their review to some paths with
 `critique start --scope <path>`.
 
-**For agents (and scripts).** `critique -h` lists the commands: `start`, `submit`, `wait`, `list`,
-`diff`, `reply`, `resolve`, `comment`, and so on. They print plain text meant for agents to read, and
+**For agents (and scripts).** `critique -h` lists the commands: `start`, `submit`, `wait`, `watch`,
+`ack`, `list`, `diff`, `reply`, `resolve`, `comment`, and so on. They print plain text meant for agents to read, and
 `list`, `show`, and `wait` also print JSON with `--json`. Outside a terminal, `critique` never opens
 Neovim, so an agent can't get stuck in it. The [skill](skills/critique/SKILL.md) describes the loop.
 
@@ -217,6 +238,7 @@ vim.keymap.set('n', '<leader>cs', '<cmd>Critique submit<cr>', { desc = 'Critique
 | `:Critique files` | Reopen the changed-files list |
 | `:Critique refresh` | Reload comments (and, in a local review, the diff) |
 | `:Critique submit` | GitHub: publish your pending review. Local: hand the turn to the agent |
+| `:Critique live` | Local: turn live mode on or off (comments go to the agent as you save them) |
 | `:Critique help` | Open the help (`:help critique`) |
 
 On GitHub, you can comment only on lines inside a diff hunk: changed lines plus 3 lines of context
