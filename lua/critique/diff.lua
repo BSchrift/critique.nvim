@@ -2,6 +2,10 @@
 local M = {}
 local xdiff = vim.text.diff or vim.diff -- renamed in nvim 0.12
 
+-- `git diff` as GitHub runs it: 3 lines of context, renames, Myers; user config can't change the hunks.
+M.GIT_ARGS = { '-c', 'core.quotepath=false', '-c', 'diff.suppressBlankEmpty=false', 'diff', '--no-color', '--no-ext-diff',
+  '--diff-algorithm=myers', '-M', '-U3', '--src-prefix=a/', '--dst-prefix=b/' }
+
 -- Words (incl. UTF-8), whitespace runs, and single punctuation bytes.
 local function tokenize(s)
   local toks, i = {}, 1
@@ -74,8 +78,8 @@ function M.parse(text)
       elseif vim.startswith(line, 'deleted file') then file.status = 'D'
       elseif vim.startswith(line, 'rename from ') then file.status, file.old_path = 'R', line:sub(13)
       elseif vim.startswith(line, 'rename to ') then file.path = line:sub(11)
-      elseif vim.startswith(line, '--- a/') then file.old_path = line:sub(7)
-      elseif vim.startswith(line, '+++ b/') then file.path = line:sub(7)
+      elseif vim.startswith(line, '--- a/') then file.old_path = line:sub(7):gsub('\t$', '') -- git adds a TAB after names with spaces
+      elseif vim.startswith(line, '+++ b/') then file.path = line:sub(7):gsub('\t$', '')
       end
     end
   end

@@ -1,7 +1,7 @@
 vim.api.nvim_create_user_command('Critique', function(o) require('critique').command(o) end, {
-  nargs = '+',
+  nargs = '*',
   range = true,
-  desc = 'Review a GitHub pull request',
+  desc = 'Review a GitHub PR, or an agent\'s local changes',
   complete = function(arg, line)
     if not line:match('^%S+%s+%S*$') then return {} end -- only the subcommand completes
     local names = vim.tbl_keys(require('critique').cmds)

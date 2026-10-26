@@ -1,27 +1,37 @@
 #!/bin/sh
-# Review a GitHub pull request in Neovim. See `critique -h`.
+# Review GitHub pull requests, or local changes with an AI agent, in Neovim. See `critique -h`.
+plugin=$(cd "$(dirname "$(readlink -f "$0")")/.." && pwd)
+# The CLI runs `nvim -l`; in an agent sandbox it can't write its log and would drop .nvimlog into the repo.
+cli() { NVIM_LOG_FILE="${NVIM_LOG_FILE:-/dev/null}" exec nvim -l "$plugin/lua/critique/cli.lua" "$@"; }
 case "$1" in
-  -h|--help)
+  -h|--help|help)
     cat <<'HELP'
-Usage: critique <pull-request-url>
+Usage:
+  critique <pull-request-url>    review a GitHub pull request in Neovim
+  critique [<review>]            open a local review in Neovim. With no argument: the open review
+                                 in this repo, or a new one of this branch's changes
+  critique <command> ...         work on a local review from the shell (this is what agents use)
 
-Check out a GitHub pull request and review it in Neovim with critique.nvim.
-
-Any PR link works, including GitHub Enterprise hosts and links to a specific
-file, line, or comment:
-  critique https://github.com/owner/repo/pull/123
+GitHub PR links can point at a file, line, or comment, on github.com or GitHub Enterprise:
   critique https://github.com/owner/repo/pull/123/changes#diff-<hash>R31
-  critique https://github.example.com/team/repo/pull/7#discussion_r123456
+A local review handle is its id, optionally with @<checkout path> and #<thread>:
+  critique promo-codes-7k2f#3
 
-Needs the GitHub CLI (gh). If you're not logged in to the PR's host,
-critique runs `gh auth login --hostname <host>` first.
-
-Inside Neovim: :Critique help, or :help critique.
 HELP
+    NVIM_LOG_FILE="${NVIM_LOG_FILE:-/dev/null}" nvim -l "$plugin/lua/critique/cli.lua" --help
+    printf '\nInside Neovim: :Critique help, or :help critique.\n'
     exit 0 ;;
-  '') echo "usage: critique <pull-request-url>   (critique -h for help)" >&2; exit 1 ;;
+  start|ls|status|list|show|diff|comment|reply|resolve|unresolve|edit|delete|submit|wait|close|-*)
+    cli "$@" ;;
 esac
-command -v gh >/dev/null || { echo "critique needs the GitHub CLI: https://cli.github.com" >&2; exit 1; }
-host=$(printf '%s' "$1" | sed -E 's#^https?://([^/]+)/.*#\1#')
-gh auth status --hostname "$host" >/dev/null 2>&1 || gh auth login --hostname "$host" || exit 1
+# Not a terminal (an agent's shell, a script): never start an interactive Neovim. The CLI explains instead.
+[ -t 0 ] && [ -t 1 ] || cli "$@"
+case "$1" in
+  ''|*-[0-9a-f][0-9a-f][0-9a-f][0-9a-f]|*-[0-9a-f][0-9a-f][0-9a-f][0-9a-f][@#]*) ;; # a review handle
+  http://*|https://*)
+    command -v gh >/dev/null || { echo "critique needs the GitHub CLI: https://cli.github.com" >&2; exit 1; }
+    host=$(printf '%s' "$1" | sed -E 's#^https?://([^/]+)/.*#\1#')
+    gh auth status --hostname "$host" >/dev/null 2>&1 || gh auth login --hostname "$host" || exit 1 ;;
+  *) cli "$@" ;; # a typo of a command: let the CLI say so
+esac
 exec nvim -c "Critique open $1"

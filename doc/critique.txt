@@ -1,12 +1,16 @@
-*critique.txt*  Review GitHub pull requests inside a real checkout of the PR
+*critique.txt*  Code review in Neovim: your AI agent's changes, and GitHub PRs
 
                                                     *critique* *critique.nvim*
 
-critique.nvim checks a pull request out locally and opens it in your normal
-Neovim. A GitHub-style diff is drawn over the real files, so your LSP,
-telescope, `gd`, grep, and formatters all keep working. Comments sync to a
-pending review on GitHub as you save them, and `:Critique submit` publishes
-them all at once.
+critique.nvim reviews code inside your normal Neovim, with a GitHub-style
+diff drawn over the real files, so your LSP, telescope, `gd`, grep, and
+formatters all keep working. It reviews two kinds of changes:
+
+- GitHub pull requests: the PR is checked out locally, and comments sync to
+  a pending review on GitHub as you save them.
+- Local reviews with an AI agent (|critique-local|): the agent hands you its
+  changes, you comment, it answers and fixes in the same threads, and you take
+  turns. Everything stays in the repo, nothing goes to GitHub.
 
 1. Requirements                                    |critique-requirements|
 2. Quick start                                     |critique-quickstart|
@@ -17,13 +21,14 @@ them all at once.
 7. Highlights                                      |critique-highlights|
 8. How it works                                    |critique-internals|
 9. Troubleshooting                                 |critique-troubleshooting|
+10. Local reviews with an agent                    |critique-local|
 
 ==============================================================================
 1. Requirements                                        *critique-requirements*
 
 - Neovim 0.11+
 - git
-- GitHub CLI (https://cli.github.com), logged in: >sh
+- For GitHub PRs: GitHub CLI (https://cli.github.com), logged in: >sh
     gh auth login
 <
   For GitHub Enterprise Server, log in to your company's host: >sh
@@ -61,6 +66,13 @@ only to you. Quit any time and run the same command to continue.
       .../pull/123/files#diff-<hash>L12       line 12 of the old version
       .../pull/123#discussion_r<id>           that review comment
 <
+:Critique open {handle}
+:Critique open
+    Open a local review (|critique-local|) by its handle, e.g.
+    `cart-minimum-3f9a`, `cart-minimum-3f9a#3` (jump to thread 3), or
+    `cart-minimum-3f9a@/path/to/checkout`. With no argument: the open review
+    in the current repo, a choice if there are several, or a new review of
+    the current branch's changes if there are none.
 :Critique comment                                         *:Critique-comment*
     Comment on the cursor line. If the line already has a thread, open it
     instead, to read it and reply, or to edit your pending comment.
@@ -94,11 +106,13 @@ only to you. Quit any time and run the same command to continue.
     Reopen the quickfix list of changed files.
 
 :Critique refresh                                         *:Critique-refresh*
-    Reload comments from GitHub.
+    Reload comments. In a local review, also recompute the diff and reload
+    files the agent changed (this also happens on its own when it submits).
 
 :Critique submit                                           *:Critique-submit*
-    Publish your pending review as Comment, Approve, or Request changes,
-    with an optional summary.
+    GitHub: publish your pending review as Comment, Approve, or Request
+    changes, with an optional summary. Local review: publish your comments to
+    the agent with an optional summary; it is then the agent's turn.
 
 :Critique help                                               *:Critique-help*
     Open this help.
@@ -118,12 +132,14 @@ critique sets no other mappings. Some suggestions: >lua
 `:Critique comment` opens a markdown buffer in a split. It shows the thread
 so far, then a line:
     <!-- ▼ write below · :w saves to your pending review · :q closes ▼ -->
-Write your comment below it. `:w` saves it to your pending review on GitHub;
-saving again updates the same comment. `:q` closes the buffer.
+Write your comment below it. `:w` saves it to your pending review on GitHub
+(in a local review: a draft the agent sees after `:Critique submit`); saving
+again updates the same comment. `:q` closes the buffer.
 
-As on GitHub, you can only comment on lines inside a diff hunk: changed lines
-plus up to 3 lines of context around them. Their line numbers are tinted
-(|hl-CritiqueHunk|). To comment on a deleted line, use `:Critique before`.
+On GitHub PRs, you can only comment on lines inside a diff hunk: changed
+lines plus up to 3 lines of context around them. Their line numbers are
+tinted (|hl-CritiqueHunk|). Local reviews allow any line of any file. To
+comment on a deleted line, use `:Critique before`.
 
 Comments are placed by line number, so `:Critique comment` refuses while the
 buffer has unsaved edits.
@@ -136,11 +152,17 @@ On the PR's version of a file:
 - deleted lines appear as red virtual lines above where they were
 - within a changed line, the changed words are a darker shade
 - line numbers you can comment on are tinted gray-blue
-- threads appear at the end of their line: 💬, then the comment count and
-  the first comment
+- threads appear at the end of their line: 💬 (✓ when resolved), then in a
+  local review the thread number, then the comment count and the first
+  comment, e.g. ` 💬 #2 (3) · claude: …`. Your unsubmitted comments use
+  |hl-CritiquePending|. A local thread whose code is gone is marked
+  `outdated` and stays where the code was.
 
 `:Critique before` shows the reverse: deletions in place, additions virtual.
 The buffer is always the real file, so other plugins see the real file.
+
+In a local review, files that have threads but no changes are listed in the
+quickfix list too (e.g. `README.md  1 thread`).
 
 ==============================================================================
 6. Links                                                      *critique-links*
@@ -215,5 +237,59 @@ LSP errors about missing dependencies ~
 
 Disk space ~
     Delete `~/.cache/nvim/critique`, or one `<host>/<owner>/<repo>` in it.
+
+==============================================================================
+10. Local reviews with an agent                              *critique-local*
+
+A local review is a GitHub-style review of changes in a checkout on your
+machine, usually an AI agent's. You review in Neovim; the agent uses the
+`critique` shell command. You take turns: each side writes comments, then
+submits to hand the turn over. Nothing goes to GitHub.
+
+The loop ~
+1. The agent runs `critique start`, makes its change, runs `critique submit`,
+   and gives you the command it printed, e.g. `critique cart-minimum-3f9a`.
+2. You run it (or `:Critique open cart-minimum-3f9a`). Comment, reply,
+   resolve, and delete exactly as on a PR, on any line. `:w` saves a draft
+   that the agent can't see yet.
+3. `:Critique submit` publishes your comments to the agent.
+4. The agent, blocked in `critique wait`, reads them, changes code, replies,
+   resolves what it fixed, and submits. Neovim reloads the changed files and
+   threads, and says it's your turn.
+5. Repeat until you submit with nothing left open.
+
+Agents learn this from the critique skill. See the README for installing it
+in Claude Code, Codex, Cursor, and other agents. `critique -h` lists the
+shell commands: start, ls, status, list, show, diff, comment, reply,
+resolve, unresolve, edit, delete, submit, wait, close.
+
+You can also start a review yourself: `critique` (or `:Critique open`) in a
+repo with no review opens a new one of the branch's changes.
+
+Agent-friendly CLI ~
+The shell commands print plain text written for agents: each thread with its
+code, `needs your reply` on threads waiting for the agent, `new` on comments
+since its last submit, and a `Next:` line saying what to do. `list`, `show`,
+and `wait` also print JSON with `--json`. `wait` refuses while the agent has
+unsubmitted work. Outside a terminal, `critique` never opens Neovim, and it
+never writes into the repo except under `.critique/`, so it is safe in agent
+sandboxes. `critique diff` prints the changes under review.
+
+Handles ~
+Each review has an id such as `cart-minimum-3f9a`. `critique <id>` finds it
+from any directory, through an index in your state directory. If the agent's
+sandbox could not write the index, its handle is `<id>@<checkout>`. Add `#n`
+to jump to thread n. `critique ls` lists open reviews in the current repo.
+
+How it works ~
+- Reviews are append-only logs in `.critique/reviews/<id>.jsonl` in the
+  checkout. `.critique/` ignores itself, so it never shows up in git.
+- The diff is the review's base commit, fixed when it started, against the
+  working tree, including uncommitted and untracked files.
+- Each comment stores the code it was left on. As the agent edits, threads
+  follow that code; if it is gone, the thread is marked outdated and stays
+  where the code was, so you can still read and answer it.
+- Several agents: give each one its own git worktree. Agents sharing one
+  checkout can limit a review to some paths with `critique start --scope`.
 
  vim:tw=78:ts=8:ft=help:norl:
