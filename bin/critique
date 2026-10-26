@@ -1,6 +1,7 @@
 #!/bin/sh
-# Usage: critique https://github.com/<owner>/<repo>/pull/<number>
+# Usage: critique https://<github host>/<owner>/<repo>/pull/<number>
 [ -n "$1" ] || { echo "usage: critique <github-pr-url>" >&2; exit 1; }
 command -v gh >/dev/null || { echo "critique needs the GitHub CLI: https://cli.github.com" >&2; exit 1; }
-gh auth status >/dev/null 2>&1 || gh auth login || exit 1
+host=$(printf '%s' "$1" | sed -E 's#^https?://([^/]+)/.*#\1#')
+gh auth status --hostname "$host" >/dev/null 2>&1 || gh auth login --hostname "$host" || exit 1
 exec nvim -c "Critique open $1"

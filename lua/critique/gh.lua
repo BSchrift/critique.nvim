@@ -32,8 +32,9 @@ function M.git(dir, ...)
   return r.stdout
 end
 
-function M.gql(query, vars)
-  local r = M.run({ 'gh', 'api', 'graphql', '--input', '-' }, { stdin = vim.json.encode({ query = query, variables = vars }) })
+-- host is the GitHub host of the PR (github.com, or a GitHub Enterprise Server domain).
+function M.gql(host, query, vars)
+  local r = M.run({ 'gh', 'api', 'graphql', '--hostname', host, '--input', '-' }, { stdin = vim.json.encode({ query = query, variables = vars }) })
   local ok, res = pcall(vim.json.decode, r.stdout, { luanil = { object = true, array = true } })
   if not ok or not res or res.errors or r.code ~= 0 then
     error(ok and res and res.errors and res.errors[1].message or vim.trim(r.stderr), 0)
@@ -42,9 +43,9 @@ function M.gql(query, vars)
 end
 
 -- Run a GitHub mutation by name; `fields` selects what to return from its payload.
-function M.mutate(name, input, fields)
+function M.mutate(host, name, input, fields)
   local q = ('mutation($i: %sInput!) { %s(input: $i) { %s } }'):format(name:sub(1, 1):upper() .. name:sub(2), name, fields or 'clientMutationId')
-  return M.gql(q, { i = input })[name]
+  return M.gql(host, q, { i = input })[name]
 end
 
 return M

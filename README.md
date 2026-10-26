@@ -16,6 +16,8 @@ Review GitHub pull requests in Neovim, inside a real checkout of the PR.
   threads, delete your own comments, comment on several lines at once, and comment on deleted lines.
 - **Before/after.** Switch any file to its pre-PR version at the same spot, or hide the diff
   overlay for a plain view.
+- **Share a line.** `:Critique link` copies a permalink to the line you're on.
+- **GitHub Enterprise.** Works with self-hosted GitHub. critique takes the host from the PR URL.
 
 ## Getting started
 
@@ -31,6 +33,10 @@ Review GitHub pull requests in Neovim, inside a real checkout of the PR.
 
   critique uses gh for everything: fetching the PR, cloning private repos, and posting comments.
   It doesn't need its own token.
+
+  For **GitHub Enterprise Server**, log in to your company's host once:
+  `gh auth login --hostname github.yourcompany.com`. The `critique` launcher prompts you
+  to do this the first time you open a PR from a new host.
 
 ### 2. Install the plugin
 
@@ -73,7 +79,9 @@ fetch new commits. Then:
    the whole thread and can reply, or edit your pending comment.
 4. **Look back.** `:Critique before` shows the file as it was before the PR (comment there to
    comment on deleted lines). `:Critique after` comes back.
-5. **Submit.** `:Critique submit` asks for Comment / Approve / Request changes and an optional summary.
+5. **Share a line.** `:Critique link` copies a permalink to the cursor line (or a visual
+   selection) to your clipboard, ready to paste into Slack or a ticket.
+6. **Submit.** `:Critique submit` asks for Comment / Approve / Request changes and an optional summary.
 
 Until you submit, your comments are a pending review: they're saved on GitHub but only you can see them.
 If you quit halfway, run `critique <url>` again and continue where you left off.
@@ -88,6 +96,7 @@ vim.keymap.set('n', '<leader>cb', function()
   vim.cmd.Critique(vim.api.nvim_buf_get_name(0):match('^critique://') and 'after' or 'before')
 end, { desc = 'Critique: before/after' })
 vim.keymap.set('n', '<leader>ct', '<cmd>Critique toggle<cr>', { desc = 'Critique: toggle diff' })
+vim.keymap.set({ 'n', 'x' }, '<leader>cl', ':Critique link<cr>', { desc = 'Critique: copy link to line' })
 vim.keymap.set('n', '<leader>cr', '<cmd>Critique resolve<cr>', { desc = 'Critique: resolve thread' })
 vim.keymap.set('n', '<leader>cs', '<cmd>Critique submit<cr>', { desc = 'Critique: submit review' })
 ```
@@ -104,6 +113,7 @@ vim.keymap.set('n', '<leader>cs', '<cmd>Critique submit<cr>', { desc = 'Critique
 | `:Critique before` | Show the file as it was before the PR, at the matching line |
 | `:Critique after` | Back to the PR's version of the file |
 | `:Critique toggle` | Hide / show the diff overlay |
+| `:Critique link` | Copy a permalink to the cursor line (or a visual selection's lines) |
 | `:Critique files` | Reopen the changed-files list |
 | `:Critique refresh` | Reload comments from GitHub |
 | `:Critique submit` | Publish your pending review |
@@ -111,9 +121,16 @@ vim.keymap.set('n', '<leader>cs', '<cmd>Critique submit<cr>', { desc = 'Critique
 As on GitHub, you can comment only on lines inside a diff hunk: changed lines plus 3 lines
 of context around them.
 
+`:Critique link` builds a `https://<host>/<owner>/<repo>/blob/<commit>/<path>#L<n>` permalink.
+The host comes from the PR URL, so self-hosted GitHub works without any setup. The link points
+at the commit you're looking at: the PR head, or in `:Critique before`, the base commit (and the
+file's old path if it was renamed). It works for any file in the repo, not just files in the PR.
+The link goes to your system clipboard (`+`) and the unnamed register. If Neovim has no
+clipboard provider, it goes to the unnamed register only, so `p` pastes it.
+
 ## How it works
 
-- Each repo is cloned once, blobless, to `~/.cache/nvim/critique/<owner>/<repo>/repo.git`.
+- Each repo is cloned once, blobless, to `~/.cache/nvim/critique/<host>/<owner>/<repo>/repo.git`.
   Each PR gets a git worktree next to it, at `.../pr-<number>`. Neovim's working directory
   is set to that worktree, which is why every other tool just works.
 - Reopening a PR fetches new commits and checks out the PR head. If you've edited files in the
@@ -130,10 +147,12 @@ of context around them.
 | `To get started with GitHub CLI, please run: gh auth login` | Run `gh auth login`. The `critique` launcher offers to do this for you. |
 | `GitHub only accepts comments on lines inside one diff hunk` | Comment on a changed line or within 3 lines of one. For deleted lines, use `:Critique before`. |
 | `save or undo your edits first` | Comments are placed by line number, so the buffer must match the PR. Undo (`u`) or `:e!`. |
-| Reopening fails with a checkout error | You changed files in the worktree. Go to `~/.cache/nvim/critique/<owner>/<repo>/pr-<n>` and `git stash` or `git checkout .`. |
+| Reopening fails with a checkout error | You changed files in the worktree. Go to `~/.cache/nvim/critique/<host>/<owner>/<repo>/pr-<n>` and `git stash` or `git checkout .`. |
 | LSP errors about missing dependencies | The worktree is a fresh checkout. Install the project's dependencies there as you would for any clone. |
 | A thread I expect isn't shown | Outdated threads (on code that has since changed) are hidden, as on GitHub's Files tab. |
-| Using too much disk | Delete `~/.cache/nvim/critique` (or one `<owner>/<repo>` inside it). |
+| `HTTP 401` or `authentication required` for a company host | Run `gh auth login --hostname <your GitHub host>`. |
+| `:Critique link` says "no system clipboard" | Neovim found no clipboard tool. The link is in the unnamed register (`p` pastes it). See `:help clipboard`. |
+| Using too much disk | Delete `~/.cache/nvim/critique` (or one `<host>/<owner>/<repo>` inside it). |
 
 ## Customizing colors
 

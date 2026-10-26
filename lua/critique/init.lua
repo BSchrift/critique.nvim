@@ -141,7 +141,7 @@ local function read_base(buf)
 end
 
 local function fetch_pr(st)
-  local pr = gh.gql(PR_QUERY, { owner = st.owner, name = st.name, number = st.number }).repository.pullRequest
+  local pr = gh.gql(st.host, PR_QUERY, { owner = st.owner, name = st.name, number = st.number }).repository.pullRequest
   st.pr_id, st.review_id = pr.id, (pr.reviews.nodes[1] or {}).id
   st.threads = vim.tbl_map(function(t)
     t.comments = t.comments.nodes
@@ -157,7 +157,7 @@ end
 
 local function ensure_review()
   S.review_id = S.review_id
-    or gh.mutate('addPullRequestReview', { pullRequestId = S.pr_id, commitOID = S.head }, 'pullRequestReview { id }').pullRequestReview.id
+    or gh.mutate(S.host, 'addPullRequestReview', { pullRequestId = S.pr_id, commitOID = S.head }, 'pullRequestReview { id }').pullRequestReview.id
   return S.review_id
 end
 
@@ -170,13 +170,13 @@ local function save(buf, ctx)
   local body = vim.trim(table.concat(lines, '\n', at + 1))
   if body == '' then error('comment is empty; nothing saved', 0) end
   if ctx.comment then
-    gh.mutate('updatePullRequestReviewComment', { pullRequestReviewCommentId = ctx.comment.id, body = body })
+    gh.mutate(S.host, 'updatePullRequestReviewComment', { pullRequestReviewCommentId = ctx.comment.id, body = body })
   elseif ctx.thread then
     local input = { pullRequestReviewThreadId = ctx.thread.id, pullRequestReviewId = ensure_review(), body = body }
-    ctx.comment = gh.mutate('addPullRequestReviewThreadReply', input, 'comment { id }').comment
+    ctx.comment = gh.mutate(S.host, 'addPullRequestReviewThreadReply', input, 'comment { id }').comment
   else
     local input = vim.tbl_extend('force', ctx.anchor, { pullRequestReviewId = ensure_review(), body = body })
-    local t = gh.mutate('addPullRequestReviewThread', input, 'thread { id comments(first: 1) { nodes { id } } }').thread
+    local t = gh.mutate(S.host, 'addPullRequestReviewThread', input, 'thread { id comments(first: 1) { nodes { id } } }').thread
     if not t then error('GitHub rejected the comment', 0) end
     ctx.comment = t.comments.nodes[1]
   end
@@ -248,13 +248,13 @@ M.cmds = cmds
 
 function cmds.open(o)
   local url = o.fargs[2] or ''
-  local owner, name, number = url:match('github%.com/([^/]+)/([^/]+)/pull/(%d+)')
-  if not owner then error('usage: :Critique open https://github.com/<owner>/<repo>/pull/<number>', 0) end
-  local st = { owner = owner, name = name, number = tonumber(number), overlay = true, by_path = {} }
+  local host, owner, name, number = url:match('^https?://([^/]+)/([^/]+)/([^/]+)/pull/(%d+)')
+  if not owner then error('usage: :Critique open https://<github host>/<owner>/<repo>/pull/<number>', 0) end
+  local st = { host = host, owner = owner, name = name, number = tonumber(number), overlay = true, by_path = {} }
   notify(('fetching %s/%s#%s…'):format(owner, name, number))
   local pr = fetch_pr(st)
 
-  local root = ('%s/critique/%s/%s'):format(vim.fn.stdpath('cache'), owner, name)
+  local root = ('%s/critique/%s/%s/%s'):format(vim.fn.stdpath('cache'), host, owner, name)
   local git_dir, wt = root .. '/repo.git', root .. '/pr-' .. number
   if not vim.uv.fs_stat(git_dir) then
     notify('cloning (first time only)…')
@@ -262,7 +262,7 @@ function cmds.open(o)
     -- Blobless: commits and trees now, file contents on demand. gh supplies credentials for private repos.
     gh.git(root, 'clone', '--bare', '--filter=blob:none', '--single-branch',
       '-c', 'credential.helper=', '-c', 'credential.helper=!gh auth git-credential',
-      ('https://github.com/%s/%s.git'):format(owner, name), git_dir)
+      ('https://%s/%s/%s.git'):format(host, owner, name), git_dir)
   end
   gh.git(git_dir, 'fetch', '--no-tags', 'origin', pr.baseRefOid, pr.headRefOid)
   if vim.uv.fs_stat(wt) then
@@ -344,7 +344,7 @@ function cmds.delete()
     format_item = function(c) return (c.state == 'PENDING' and '(pending) ' or '') .. first_line(c.body) end,
   })
   if not c then return end
-  gh.mutate('deletePullRequestReviewComment', { id = c.id })
+  gh.mutate(S.host, 'deletePullRequestReviewComment', { id = c.id })
   refresh()
   notify('comment deleted')
 end
@@ -354,7 +354,7 @@ function cmds.resolve()
   if #ts == 0 then error('no thread on this line', 0) end
   local t = pick(ts, 'Resolve thread', thread_label)
   if not t then return end
-  gh.mutate(t.isResolved and 'unresolveReviewThread' or 'resolveReviewThread', { threadId = t.id })
+  gh.mutate(S.host, t.isResolved and 'unresolveReviewThread' or 'resolveReviewThread', { threadId = t.id })
   refresh()
   notify(t.isResolved and 'thread unresolved' or 'thread resolved')
 end
@@ -369,9 +369,9 @@ function cmds.submit()
   if not body then return end
   body = body ~= '' and body or nil
   if S.review_id then
-    gh.mutate('submitPullRequestReview', { pullRequestReviewId = S.review_id, event = event, body = body })
+    gh.mutate(S.host, 'submitPullRequestReview', { pullRequestReviewId = S.review_id, event = event, body = body })
   else
-    gh.mutate('addPullRequestReview', { pullRequestId = S.pr_id, commitOID = S.head, event = event, body = body })
+    gh.mutate(S.host, 'addPullRequestReview', { pullRequestId = S.pr_id, commitOID = S.head, event = event, body = body })
   end
   refresh()
   notify('review submitted')
@@ -380,6 +380,23 @@ end
 function cmds.toggle()
   S.overlay = not S.overlay
   redraw()
+end
+
+-- Permalink to the cursor line (or visual range) at the commit this buffer shows.
+function cmds.link(o)
+  local path, side = here()
+  local file = S.by_path[path]
+  if side == 'LEFT' and file then path = file.old_path end
+  local lines = o.line1 == o.line2 and ('L%d'):format(o.line1) or ('L%d-L%d'):format(o.line1, o.line2)
+  local url = ('https://%s/%s/%s/blob/%s/%s#%s'):format(S.host, S.owner, S.name, side == 'LEFT' and S.base or S.head,
+    (path:gsub('[^%w%-._~/]', function(c) return ('%%%02X'):format(c:byte()) end)), lines)
+  vim.fn.setreg('"', url)
+  if vim.fn.has('clipboard') == 1 then
+    vim.fn.setreg('+', url)
+    notify('copied ' .. url)
+  else
+    notify('no system clipboard; yanked to the " register: ' .. url)
+  end
 end
 
 function cmds.before() swap('LEFT') end
