@@ -17,7 +17,7 @@ query($owner: String!, $name: String!, $number: Int!) {
       reviewThreads(first: 100) {
         nodes {
           id isResolved path line diffSide
-          comments(first: 100) { nodes { id body state viewerDidAuthor author { login } } }
+          comments(first: 100) { nodes { id databaseId body state viewerDidAuthor author { login } } }
         }
       }
     }
@@ -243,6 +243,32 @@ local function swap(to)
   pcall(vim.api.nvim_win_set_cursor, 0, { lnum, 0 })
 end
 
+-- Jump to what a pasted PR URL points at: #diff-<sha256 of path>[R|L<line>], or #discussion_r<comment id>.
+local function goto_anchor(url)
+  local hash, side, line = url:match('#diff%-(%x+)([LR]?)(%d*)')
+  local id = tonumber(url:match('#discussion_r(%d+)'))
+  if not hash and not id then return end
+  local path
+  if hash then
+    for p in pairs(S.by_path) do
+      if vim.fn.sha256(p) == hash then path = p end
+    end
+    side = side == 'L' and 'LEFT' or 'RIGHT'
+  else
+    for _, t in ipairs(S.threads) do
+      for _, c in ipairs(t.comments) do
+        if c.databaseId == id then path, side, line = t.path, t.diffSide, t.line end
+      end
+    end
+  end
+  local file = S.by_path[path]
+  if not file then return notify('the link points at something that is not in this PR\'s diff', vim.log.levels.WARN) end
+  if file.status == 'D' then side = 'LEFT' end
+  vim.cmd.edit(vim.fn.fnameescape(side == 'LEFT' and 'critique://base/' .. path or S.dir .. '/' .. path))
+  pcall(vim.api.nvim_win_set_cursor, 0, { tonumber(line) or diff.stops(file, side)[1] or 1, 0 })
+  vim.cmd('normal! zz')
+end
+
 local cmds = {}
 M.cmds = cmds
 
@@ -291,6 +317,7 @@ function cmds.open(o)
   cmds.files()
   if #S.files > 0 then vim.cmd.cfirst() end
   redraw()
+  goto_anchor(url)
   notify(('%s · %d files changed'):format(S.title, #S.files))
 end
 

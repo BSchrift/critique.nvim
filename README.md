@@ -67,6 +67,10 @@ critique https://github.com/owner/repo/pull/123
 
 Or, from inside Neovim: `:Critique open https://github.com/owner/repo/pull/123`.
 
+You can paste any PR link, including links copied from GitHub that point at a specific file,
+line, or comment (`…/pull/123/changes#diff-…R31`, `…/pull/123#discussion_r…`).
+critique opens the PR and jumps to that spot.
+
 The first time you open a repo, critique clones it, which takes a few seconds. Later opens only
 fetch new commits. Then:
 
@@ -105,7 +109,7 @@ vim.keymap.set('n', '<leader>cs', '<cmd>Critique submit<cr>', { desc = 'Critique
 
 | Command | What it does |
 |---|---|
-| `:Critique open <url>` | Fetch the PR, check it out, show the diff |
+| `:Critique open <url>` | Fetch the PR, check it out, show the diff. If the URL links to a file, line, or comment, jump there |
 | `:Critique comment` | Comment on the cursor line, or open the thread already there |
 | `:'<,'>Critique comment` | Multi-line comment on a visual selection (always starts a new thread) |
 | `:Critique delete` | Delete one of your comments on the cursor line |
