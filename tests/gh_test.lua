@@ -1,0 +1,95 @@
+-- Unit tests for lua/critique/gh.lua, with `gh` stubbed out (offline). Run: nvim --headless -l tests/gh_test.lua
+local H = dofile(vim.fn.fnamemodify(debug.getinfo(1, 'S').source:sub(2), ':p:h') .. '/helpers.lua')
+local gh = require('critique.gh')
+
+-- Runs fn inside gh.async and waits for it; returns what it returned, or raises what it raised.
+local function run_async(fn)
+  local done, res, notified = false, nil, nil
+  local notify = vim.notify
+  vim.notify = function(m) notified = m end
+  gh.async(function()
+    res = vim.F.pack_len(fn())
+    done = true
+  end)()
+  vim.wait(5000, function() return done or notified ~= nil end, 10)
+  vim.notify = notify
+  if notified then error(notified, 0) end
+  return vim.F.unpack_len(res)
+end
+
+-- Replaces vim.system for one call to `gh`, recording what was sent.
+local function stub_gh(result)
+  local sent = {}
+  local system = vim.system
+  vim.system = function(cmd, opts, cb)
+    if cmd[1] ~= 'gh' then return system(cmd, opts, cb) end
+    sent.cmd, sent.stdin = cmd, opts.stdin and vim.json.decode(opts.stdin)
+    vim.schedule(function() cb(vim.tbl_extend('force', { code = 0, stdout = '', stderr = '' }, result)) end)
+  end
+  return sent, function() vim.system = system end
+end
+
+H.section('async / await')
+H.test('await returns what the callback receives, including nils', function()
+  local a, b, c = run_async(function()
+    return gh.await(function(x, cb) cb(x, nil, 3) end, 1)
+  end)
+  H.eq({ a, b, c }, { 1, nil, 3 })
+end)
+H.test('await works when the callback is called synchronously', function()
+  H.eq(run_async(function() return gh.await(function(cb) cb('now') end) end), 'now')
+end)
+H.test('errors inside async are reported, not thrown', function()
+  H.has(H.errors(run_async, function() error('boom', 0) end), 'critique: boom')
+end)
+H.test('run returns the vim.system result', function()
+  local r = run_async(function() return gh.run({ 'echo', 'hi' }) end)
+  H.eq({ r.code, r.stdout }, { 0, 'hi\n' })
+end)
+H.test('git raises with stderr on failure', function()
+  H.has(H.errors(run_async, function() gh.git(H.tmp, 'rev-parse', 'HEAD') end), 'not a git repository')
+end)
+
+H.section('gql / mutate')
+H.test('gql sends the query and variables to the right host and returns data', function()
+  local sent, restore = stub_gh({ stdout = '{"data":{"viewer":{"login":"me"}}}' })
+  local data = run_async(function() return gh.gql('ghe.example.com', 'query { viewer { login } }', { a = 1 }) end)
+  restore()
+  H.eq(data, { viewer = { login = 'me' } })
+  H.eq({ sent.cmd[4], sent.cmd[5] }, { '--hostname', 'ghe.example.com' })
+  H.eq(sent.stdin, { query = 'query { viewer { login } }', variables = { a = 1 } })
+end)
+H.test('JSON null becomes nil', function()
+  local _, restore = stub_gh({ stdout = '{"data":{"x":null}}' })
+  local data = run_async(function() return gh.gql('github.com', 'q', {}) end)
+  restore()
+  H.eq(data.x, nil)
+end)
+H.test('GraphQL errors raise their message', function()
+  local _, restore = stub_gh({ code = 1, stdout = '{"errors":[{"message":"Could not resolve to a node"}]}' })
+  local err = H.errors(run_async, function() gh.gql('github.com', 'q', {}) end)
+  restore()
+  H.has(err, 'Could not resolve to a node')
+end)
+H.test('non-JSON failures raise stderr', function()
+  local _, restore = stub_gh({ code = 1, stdout = '', stderr = 'gh: To get started with GitHub CLI, please run: gh auth login' })
+  local err = H.errors(run_async, function() gh.gql('github.com', 'q', {}) end)
+  restore()
+  H.has(err, 'gh auth login')
+end)
+H.test('mutate builds the mutation from its name and returns its payload', function()
+  local sent, restore = stub_gh({ stdout = '{"data":{"resolveReviewThread":{"thread":{"id":"T1"}}}}' })
+  local payload = run_async(function() return gh.mutate('github.com', 'resolveReviewThread', { threadId = 'T1' }, 'thread { id }') end)
+  restore()
+  H.eq(payload, { thread = { id = 'T1' } })
+  H.eq(sent.stdin.query, 'mutation($i: ResolveReviewThreadInput!) { resolveReviewThread(input: $i) { thread { id } } }')
+  H.eq(sent.stdin.variables, { i = { threadId = 'T1' } })
+end)
+H.test('mutate selects clientMutationId by default', function()
+  local sent, restore = stub_gh({ stdout = '{"data":{"deletePullRequestReviewComment":{}}}' })
+  run_async(function() gh.mutate('github.com', 'deletePullRequestReviewComment', { id = 'C1' }) end)
+  restore()
+  H.has(sent.stdin.query, '{ clientMutationId }')
+end)
+
+H.done()
