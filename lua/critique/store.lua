@@ -104,21 +104,56 @@ function M.file_lines(review, path, side)
   return read_lines(review.root .. '/' .. path)
 end
 
+-- The log's events, in order, each with its line number as `seq`. A last line without its newline is a write
+-- still in progress (wait and watch poll while others append), so it is left for the next read.
+function M.events(log)
+  local f = io.open(log) or error('no review log at ' .. log, 0)
+  local text = f:read('a')
+  f:close()
+  local events = {}
+  local lines = vim.split(text, '\n', { plain = true })
+  table.remove(lines) -- after the last newline: empty, or a partial write
+  for seq, line in ipairs(lines) do
+    local ok, ev = pcall(vim.json.decode, line, { luanil = { object = true, array = true } })
+    if not ok then error(('%s line %d is not valid JSON'):format(log, seq), 0) end
+    ev.seq = seq
+    events[seq] = ev
+  end
+  return events
+end
+
 -- Replays the log. `viewer` ("human" or "agent") sees its own drafts, but not the other side's until submitted.
 -- Comments from the other side since the viewer's last submit are marked `new`.
+-- In a live review, comments are published as they are written: there are no drafts.
 function M.load(log, viewer)
-  local review = { log = log, root = log:match('^(.*)/%.critique/reviews/[^/]+$'), threads = {}, closed = false }
+  local review = { log = log, root = log:match('^(.*)/%.critique/reviews/[^/]+$'), threads = {}, closed = false, live = false }
   local threads, comments, drafts, my_submit, resolves = {}, {}, {}, 0, {}
-  for seq, line in ipairs(read_lines(log) or error('no review log at ' .. log, 0)) do
-    local ev = vim.json.decode(line, { luanil = { object = true, array = true } })
+  local mine = {} -- per thread: the viewer's last comment, ack, or resolve there
+  review.agent_last_seq = 0 -- the agent's last action of any kind
+  for seq, ev in ipairs(M.events(log)) do
     if ev.role == 'agent' and ev.author then review.agent_author = ev.author end
+    if ev.role == 'agent' and ev.type ~= 'start' then review.agent_last_seq = seq end
+    if ev.role == 'human' then review.human_last_at = ev.at end
+    if ev.role == viewer and (ev.thread or (ev.type == 'comment' and ev.id)) then mine[ev.thread or ev.id] = seq end
     if ev.type == 'start' then
       review.id, review.title, review.base, review.base_ref, review.scope = ev.id, ev.title, ev.base, ev.base_ref, ev.scope or {}
-      review.started_by = ev.role
+      review.started_by, review.live = ev.role, ev.live == true
+    elseif ev.type == 'live' then
+      review.live = ev.live
+      if ev.live then -- going live publishes everyone's drafts
+        for _, c in ipairs(drafts) do c.pending = false end
+      end
     elseif ev.type == 'comment' then
-      local c = { id = ev.id, author = ev.author, role = ev.role, body = ev.body, at = ev.at, pending = true, seq = seq }
+      local c = { id = ev.id, thread = ev.thread, author = ev.author, role = ev.role, body = ev.body, at = ev.at,
+        pending = not review.live, seq = seq }
       comments[ev.id] = c
       table.insert(drafts, c)
+      if threads[ev.thread] and ev.role == 'agent' then threads[ev.thread].ack = nil end -- a reply ends "on it"
+      -- Answering a resolved thread ("not quite") reopens it, so the agent sees it. A draft reopens it once it is
+      -- submitted (or, for its writer, right away), unless it gets deleted: the agent must not learn about drafts.
+      if threads[ev.thread] and ev.role == 'human' and threads[ev.thread].resolved then
+        if c.pending then c.reopens = true else threads[ev.thread].resolved = false end
+      end
       if ev.thread == ev.id then
         threads[ev.id] = {
           id = ev.id, n = #review.threads + 1, path = ev.path, side = ev.side, line = ev.line,
@@ -132,11 +167,17 @@ function M.load(log, viewer)
     elseif ev.type == 'delete' and comments[ev.id] then
       comments[ev.id].deleted = true
     elseif ev.type == 'resolve' and threads[ev.thread] then
-      threads[ev.thread].resolved = ev.resolved
-      if ev.role == viewer then table.insert(resolves, { seq = seq, n = threads[ev.thread].n }) end
+      threads[ev.thread].resolved, threads[ev.thread].ack, threads[ev.thread].resolved_seq = ev.resolved, nil, seq
+      if ev.role == viewer and not review.live then table.insert(resolves, { seq = seq, n = threads[ev.thread].n }) end
+    elseif ev.type == 'ack' and threads[ev.thread] then
+      threads[ev.thread].ack = { author = ev.author, seq = seq }
     elseif ev.type == 'submit' then
       for _, c in ipairs(drafts) do
-        if c.role == ev.role then c.pending = false end
+        if c.role == ev.role then
+          local t = threads[c.thread]
+          if c.pending and c.reopens and not c.deleted and t and t.resolved and (t.resolved_seq or 0) < c.seq then t.resolved = false end
+          c.pending = false
+        end
       end
       ev.seq = seq -- `at` has 1-second resolution; this tells two submits apart
       review.last_submit, review.turn = ev, ev.role == 'human' and 'agent' or 'human'
@@ -146,6 +187,12 @@ function M.load(log, viewer)
     end
   end
 
+  for _, c in ipairs(drafts) do -- your own unsubmitted replies reopen their threads in your own view
+    local t = threads[c.thread]
+    if c.pending and c.role == viewer and c.reopens and not c.deleted and t and t.resolved and (t.resolved_seq or 0) < c.seq then
+      t.resolved = false
+    end
+  end
   local files = {}
   review.drafts = {} -- the viewer's unsubmitted comments and resolves, by thread number
   for _, r in ipairs(resolves) do
@@ -153,7 +200,8 @@ function M.load(log, viewer)
   end
   review.threads = vim.tbl_filter(function(t)
     t.comments = vim.tbl_filter(function(c)
-      c.new = c.role ~= viewer and c.seq > my_submit
+      -- New: from the other side, since your last submit and since you last acted in this thread.
+      c.new = c.role ~= viewer and c.seq > my_submit and c.seq > (mine[t.id] or 0)
       if c.pending and c.role == viewer and not c.deleted then table.insert(review.drafts, t.n) end
       return not c.deleted and (not c.pending or c.role == viewer)
     end, t.comments)
@@ -165,8 +213,16 @@ function M.load(log, viewer)
       if now and t.start_line then t.start_line = t.start_line + now - t.orig_line end
       t.line, t.outdated = now, now == nil
     end
+    -- Waiting on the agent: open, the human spoke last, and the agent hasn't said it's on it since.
+    local last = t.comments[#t.comments]
+    t.needs_agent = last ~= nil and not t.resolved and last.role == 'human' and not (t.ack and t.ack.seq > last.seq)
     return #t.comments > 0
   end, review.threads)
+  -- Live reviews have no strict turns: it's the agent's turn while something waits on it.
+  if review.live and (review.turn or #review.threads > 0) then
+    local unseen = review.last_submit and review.last_submit.role == 'human' and review.last_submit.seq > review.agent_last_seq
+    review.turn = (unseen or vim.iter(review.threads):any(function(t) return t.needs_agent end)) and 'agent' or 'human'
+  end
   return review
 end
 
@@ -206,7 +262,7 @@ function M.start(root, opts)
   if not vim.uv.fs_stat(ignore) then vim.fn.writefile({ '*' }, ignore) end
   local log = reviews_dir(root) .. '/' .. id .. '.jsonl'
   M.append(log, { type = 'start', id = id, title = opts.title or slug, base = base, base_ref = base_ref,
-    scope = opts.scope, author = opts.author, role = opts.role })
+    scope = opts.scope, author = opts.author, role = opts.role, live = opts.live or nil })
   -- The index lets `critique <id>` work from any directory. Best effort: agent sandboxes may block it.
   pcall(function()
     vim.fn.mkdir(vim.fs.dirname(index_path()), 'p')

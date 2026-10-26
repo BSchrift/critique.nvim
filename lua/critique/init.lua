@@ -6,7 +6,8 @@ local M = {}
 local ns_diff = vim.api.nvim_create_namespace('critique.diff')
 local ns_threads = vim.api.nvim_create_namespace('critique.threads')
 local MARK = { github = '<!-- ▼ write below · :w saves to your pending review · :q closes ▼ -->',
-  ['local'] = '<!-- ▼ write below · :w saves a draft · :q closes ▼ -->' }
+  ['local'] = '<!-- ▼ write below · :w saves a draft · :q closes ▼ -->',
+  live = '<!-- ▼ write below · :w sends it to the agent · :q closes ▼ -->' }
 local S -- the open review
 
 -- shortcut: first 100 threads and 100 comments per thread; paginate if PRs outgrow that.
@@ -97,7 +98,9 @@ local function render_threads(buf, path, side)
       local pending = vim.iter(t.comments):any(function(c) return c.state == 'PENDING' end)
       local c = t.comments[1]
       local count = t.n and ('#%d (%d)'):format(t.n, #t.comments) or tostring(#t.comments)
-      local text = (' %s %s · %s%s: %s'):format(t.isResolved and '✓' or '💬', count, t.outdated and 'outdated · ' or '', login(c), first_line(c.body))
+      local state = t.ack and (' · ⏳ ' .. t.ack .. ' is on it') or t.sent and ' · sent' or ''
+      local text = (' %s %s · %s%s: %s%s'):format(t.isResolved and '✓' or '💬', count, t.outdated and 'outdated · ' or '', login(c),
+        first_line(c.body), state)
       vim.api.nvim_buf_set_extmark(buf, ns_threads, lnum - 1, 0, {
         virt_text = { { text, t.isResolved and 'CritiqueResolved' or pending and 'CritiquePending' or 'CritiqueThread' } },
       })
@@ -168,6 +171,8 @@ local function load_local(st)
   st.threads = vim.tbl_map(function(t)
     return { -- an outdated thread stays where its code was, so you can still read and answer it
       id = t.id, n = t.n, path = t.path, line = t.line or t.orig_line, outdated = t.outdated, isResolved = t.resolved,
+      ack = t.ack and not t.resolved and not t.needs_agent and t.ack.author or nil, -- a newer comment of yours is waiting
+      sent = r.live and t.needs_agent or nil, -- live: sent, but the agent hasn't picked it up yet
       diffSide = t.side == 'old' and 'LEFT' or 'RIGHT',
       comments = vim.tbl_map(function(c)
         return { id = c.id, body = c.body, state = c.pending and 'PENDING' or 'SUBMITTED', viewerDidAuthor = c.role == 'human', author = { login = c.author } }
@@ -237,6 +242,7 @@ local function save(buf, ctx)
   local body = vim.trim(table.concat(lines, '\n', at + 1))
   if body == '' then error('comment is empty; nothing saved', 0) end
   writable()
+  local reopens = S.review and ctx.thread and ctx.thread.isResolved and not ctx.comment -- a new reply on a resolved thread
   if S.review then
     if ctx.comment then
       store.append(S.log, { type = 'edit', id = ctx.comment.id, body = body })
@@ -263,7 +269,10 @@ local function save(buf, ctx)
   end
   if vim.api.nvim_buf_is_valid(buf) then vim.bo[buf].modified = false end
   refresh()
-  notify(S.review and 'saved; the agent sees it after :Critique submit' or 'saved to your pending review')
+  local agent = S.review and S.review.agent_author or 'the agent'
+  notify(not S.review and 'saved to your pending review'
+    or (S.review.live and ('sent · %s starts on it once you pause; ⏳ shows when it does'):format(agent)
+      or 'saved; the agent sees it after :Critique submit') .. (reopens and (' · reopened #' .. ctx.thread.n) or ''))
 end
 
 -- Opens a scratch markdown buffer: the thread so far, then your text below MARK. :w syncs to GitHub.
@@ -283,7 +292,7 @@ local function edit(ctx)
       table.insert(lines, '')
     end
   end
-  table.insert(lines, MARK[S.review and 'local' or 'github'])
+  table.insert(lines, MARK[S.review and (S.review.live and 'live' or 'local') or 'github'])
   vim.list_extend(lines, ctx.comment and split(ctx.comment.body) or { '' })
 
   vim.cmd('botright 12new')
@@ -361,15 +370,35 @@ local watcher, debounce
 local function watch(log)
   if watcher then watcher:close() end -- close, not just stop: stopped handles still hold an fd
   watcher, debounce = vim.uv.new_fs_event(), debounce or vim.uv.new_timer()
+  -- Announces the agent's events since the last announcement. Only this advances S.announced, so your own
+  -- saves (which refresh too) can't swallow an announcement.
   local function changed()
     if not S or S.log ~= log then return end
-    local before, was_closed = S.review.last_submit, S.review.closed
     refresh()
-    local last = S.review.last_submit
-    if S.review.closed and not was_closed then
-      notify(('%s closed the review'):format(S.review.agent_author or 'the agent'))
-    elseif last and last.role == 'agent' and (not before or before.seq ~= last.seq) then
-      notify(('%s submitted%s · your turn'):format(last.author, last.summary and (': ' .. last.summary) or ''))
+    local events = store.events(log)
+    local n, parts, who, submit, closed = {}, {}, nil, nil, false
+    for _, t in ipairs(S.threads) do n[t.id] = t.n end
+    for i = S.announced + 1, #events do
+      local ev = events[i]
+      if ev.role == 'agent' then
+        who = ev.author or who
+        if ev.type == 'submit' then submit = ev
+        elseif ev.type == 'close' then closed = true
+        elseif S.review.live and n[ev.thread] then -- live: say what it did, as it does it (else drafts stay private)
+          table.insert(parts, ev.type == 'ack' and ('is on #' .. n[ev.thread])
+            or ev.type == 'resolve' and ((ev.resolved and 'resolved #' or 'reopened #') .. n[ev.thread])
+            or ev.type == 'comment' and (ev.thread == ev.id and 'commented on #' or 'replied on #') .. n[ev.thread] or nil)
+        end
+      end
+    end
+    S.announced = #events
+    who = who or S.review.agent_author or 'the agent'
+    if closed then
+      notify(('%s closed the review'):format(who))
+    elseif submit then
+      notify(('%s submitted%s · your turn'):format(submit.author, submit.summary and (': ' .. submit.summary) or ''))
+    elseif #parts > 0 then
+      notify(('%s %s'):format(who, table.concat(vim.fn.uniq(parts), ', ')))
     end
   end
   local function soon(ms)
@@ -423,6 +452,7 @@ local function open_local(handle)
   st.me = st.me ~= '' and st.me or os.getenv('USER') or 'me'
   st.git_dir = st.dir
   load_local(st)
+  st.announced = #store.events(log) -- announce only what happens from now on
   start(st)
   watch(log)
   for _, t in ipairs(S.threads) do
@@ -430,6 +460,7 @@ local function open_local(handle)
   end
   local r, open = S.review, #vim.tbl_filter(function(t) return not t.isResolved end, S.threads)
   local turn = r.closed and 'closed' or r.turn == 'human' and 'your turn' or r.turn == 'agent' and "the agent's turn" or 'not submitted yet'
+  if r.live and not r.closed then turn = turn .. ' · live' end
   local last = r.last_submit and r.last_submit.role == 'agent' and r.last_submit.summary
   local msg = ('%s · %s changed · %s · %s%s'):format(S.title, plural(#S.files, 'file'), plural(open, 'open thread'), turn,
     last and (' · ' .. r.last_submit.author .. ': ' .. last) or '')
@@ -556,6 +587,9 @@ function cmds.submit()
     if not summary then return end
     store.append(S.log, { type = 'submit', author = S.me, role = 'human', summary = summary ~= '' and summary or nil })
     refresh()
+    if S.review.live then -- the comments already went out as they were saved
+      return notify(("told %s: that's all for now"):format(S.review.agent_author or 'the agent'))
+    end
     return notify(("sent %s · the agent's turn"):format(plural(drafts, 'comment')))
   end
   local event = gh.await(vim.ui.select, { 'COMMENT', 'APPROVE', 'REQUEST_CHANGES' }, {
@@ -596,6 +630,17 @@ function cmds.link(o)
   else
     notify('no system clipboard; yanked to the " register: ' .. url)
   end
+end
+
+-- Live: comments go to the agent as you save them, instead of waiting for :Critique submit.
+function cmds.live()
+  if not S.review then error('live mode is for local reviews with an agent', 0) end
+  writable()
+  local on, drafts = not S.review.live, #S.review.drafts
+  store.append(S.log, { type = 'live', live = on, author = S.me, role = 'human' })
+  refresh()
+  notify(on and ('live: your comments reach the agent as you save them%s'):format(drafts > 0 and (' · sent your ' .. plural(drafts, 'draft')) or '')
+    or 'live off: comments are drafts until :Critique submit')
 end
 
 function cmds.help() vim.cmd.help('critique') end

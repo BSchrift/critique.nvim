@@ -21,7 +21,7 @@ HELP
     NVIM_LOG_FILE="${NVIM_LOG_FILE:-/dev/null}" nvim -l "$plugin/lua/critique/cli.lua" --help
     printf '\nInside Neovim: :Critique help, or :help critique.\n'
     exit 0 ;;
-  start|ls|status|list|show|diff|comment|reply|resolve|unresolve|edit|delete|submit|wait|close|-*)
+  start|ls|status|list|show|diff|comment|reply|resolve|unresolve|edit|delete|submit|wait|ack|watch|close|-*)
     cli "$@" ;;
 esac
 # Not a terminal (an agent's shell, a script): never start an interactive Neovim. The CLI explains instead.

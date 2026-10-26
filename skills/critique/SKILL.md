@@ -1,6 +1,6 @@
 ---
 name: critique
-description: Local code review loop with the user through critique.nvim. Use when the user wants to review your changes in critique ("hand it to me for review", "use critique", "I'll review it in critique"), asks you to "address my critique comments" or "check critique", gives you a critique review handle like `promo-codes-7k2f`, or asks you to review their local changes with comments. Covers starting a review, handing it off, waiting for the user's comments, answering and fixing threads, and leaving review comments yourself.
+description: Local code review loop with the user through critique.nvim. Use when the user wants to review your changes in critique ("hand it to me for review", "use critique", "I'll review it in critique", "review it live"), asks you to "address my critique comments", "check critique", or "watch my critique comments", gives you a critique review handle like `promo-codes-7k2f`, or asks you to review their local changes with comments. Covers starting a review, handing it off, waiting for the user's comments, answering and fixing threads, and leaving review comments yourself.
 ---
 
 # critique: review loop with the user
@@ -72,6 +72,34 @@ double quotes: review text is markdown, and the shell would run anything in back
 5. When they answer: **don't edit their code unless they ask you to.** Resolve your own thread when they
    fixed it or convinced you; otherwise reply once with what's still missing. Then submit and wait again.
 
+## D. Live reviews: react to comments as they arrive
+
+Use this when the user asks for it ("review it live", "react to my comments as I write them"), or when
+`critique status` shows `live`. In a live review the user's comments reach you as they save them, without
+a submit, and your replies and resolves reach them right away.
+
+1. Start with `--live` (the user can also turn it on in Neovim with `:Critique live`):
+   ```sh
+   critique start --title 'Short task name' --base HEAD --as <your name> --live
+   ```
+   Make your changes and `critique submit` once to hand them over, as in A.
+2. **Listen for comments, and keep listening until the review closes.** A comment "needs you" once the user
+   has stopped saving comments for 20 seconds, so related comments arrive together. Pick what your harness
+   supports:
+   - **Claude Code:** run `critique wait -r <id> --timeout 1800` with `run_in_background`. You're notified
+     when it exits: a comment needs you, the user submitted, or 30 minutes passed. Handle what it printed,
+     then start it again. (Or use the Monitor tool on `critique watch -r <id>` with the longest timeout,
+     re-armed when it expires; each batch it prints arrives as an event.)
+   - **Other harnesses:** run `critique wait -r <id>` whenever you're free; it returns as soon as a comment
+     needs you.
+   `wait` and `watch` read the review's state, so restarting them never loses a comment. If you have to stop
+   listening, tell the user, since their comments won't reach you until you start again.
+3. **For each comment you start on, acknowledge it first** so the user sees ⏳ on the thread:
+   `critique ack -r <id> 3`. Then handle it as in A5: change the code, reply, and resolve what you fixed.
+   No submit is needed for each one; use `critique submit` only to hand back a summary of a bigger batch.
+4. Repeat until the user submits with nothing open or says they're done; then `critique close -r <id>`
+   (which also ends `watch`).
+
 ## Rules
 
 - Only use the `critique` CLI. Never edit files under `.critique/`.
@@ -104,7 +132,9 @@ double quotes: review text is markdown, and the shell would run anything in back
 | `critique resolve -r <id> <n>` / `unresolve` | Resolve or reopen a thread |
 | `critique edit -r <id> <comment-id> '<text>'` / `delete` | Change or delete your own comment (ids like `c-a35698` are in `list`) |
 | `critique submit -r <id> [--summary T]` | End your turn |
-| `critique wait -r <id> [--timeout S]` | Block until the user submits; exit 2 on timeout |
+| `critique wait -r <id> [--timeout S] [--settle S]` | Block until the user submits (live: until a comment needs you); exit 2 on timeout |
+| `critique watch -r <id> [--settle S]` | Stream the user's new comments as they arrive, until the review closes |
+| `critique ack -r <id> <n>` | Tell the user you're on thread n (shows ⏳ in Neovim) |
 | `critique close -r <id>` | Finish the review |
 | `critique ls` | Open reviews in this repo |
 

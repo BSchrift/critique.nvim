@@ -114,6 +114,11 @@ only to you. Quit any time and run the same command to continue.
     changes, with an optional summary. Local review: publish your comments to
     the agent with an optional summary; it is then the agent's turn.
 
+:Critique live                                               *:Critique-live*
+    Local reviews: turn live mode on or off. In live mode each comment goes
+    to the agent when you save it, instead of waiting for :Critique submit.
+    See |critique-live|.
+
 :Critique help                                               *:Critique-help*
     Open this help.
 
@@ -261,7 +266,7 @@ The loop ~
 Agents learn this from the critique skill. See the README for installing it
 in Claude Code, Codex, Cursor, and other agents. `critique -h` lists the
 shell commands: start, ls, status, list, show, diff, comment, reply,
-resolve, unresolve, edit, delete, submit, wait, close.
+resolve, unresolve, edit, delete, submit, wait, watch, ack, close.
 
 You can also start a review yourself: `critique` (or `:Critique open`) in a
 repo with no review opens a new one of the branch's changes.
@@ -274,6 +279,23 @@ and `wait` also print JSON with `--json`. `wait` refuses while the agent has
 unsubmitted work. Outside a terminal, `critique` never opens Neovim, and it
 never writes into the repo except under `.critique/`, so it is safe in agent
 sandboxes. `critique diff` prints the changes under review.
+
+Live reviews ~
+                                                              *critique-live*
+In a live review (`critique start --live`, or |:Critique-live|), your comments
+reach the agent as you save them, and its replies and resolves reach you as
+it writes them. The agent starts once you've stopped saving comments for
+about 20 seconds (its `--settle`), so related comments arrive together;
+until then the thread shows `· sent`. When it starts on a thread it runs
+`critique ack`, and the thread shows `⏳ <agent> is on it` until it replies.
+Neovim tells you what it did: "claude replied on #2, resolved #2". Replying
+to a resolved thread reopens it. `:Critique submit` is optional and says
+"that's all for now".
+
+The agent has to be listening: `critique wait` (in a live review it returns
+as soon as a comment needs the agent) or `critique watch` (a stream). In
+Claude Code it listens in the background. If it has stopped, tell it "watch
+my critique comments".
 
 Handles ~
 Each review has an id such as `cart-minimum-3f9a`. `critique <id>` finds it

@@ -7,7 +7,7 @@ local USAGE = [[
 Local reviews: you and an agent review code through comment threads, stored in the repo
 (.critique/), never on GitHub. The agent uses these commands; the human uses Neovim.
 
-  critique start [--title T] [--base REF] [--scope PATH]...   start a review of this checkout
+  critique start [--title T] [--base REF] [--scope PATH]... [--live]   start a review of this checkout
   critique ls                                     open reviews in this repo
   critique status                                 whose turn it is, thread counts
   critique list [--open] [--json]                 threads with code and comments
@@ -18,8 +18,15 @@ Local reviews: you and an agent review code through comment threads, stored in t
   critique resolve <n>   /   critique unresolve <n>
   critique edit <comment-id> <text|->   /   critique delete <comment-id>
   critique submit [--summary T]                   end your turn; prints the handle for the human
-  critique wait [--timeout SECONDS]               block until the human submits (exit 2 on timeout)
+  critique wait [--timeout S] [--settle S]        block until the human submits (exit 2 on timeout); in a
+                                                  live review, until a comment needs you
+  critique ack <n>                                tell the human you're on thread n (live reviews)
+  critique watch [--settle S]                     stream the human's comments as they arrive, until closed
   critique close                                  end the review
+
+Live reviews (--live, or :Critique live in Neovim): the human's comments reach you as they save them,
+without waiting for a submit, and yours reach them. wait and watch hold a batch until the human has
+been quiet for --settle seconds (default 20), so you don't start on a comment that's still changing.
 
 Options: -r <id> picks the review (needed when a checkout has several), --as <name> sets
 your author name (it sticks for later commands). Quote text with single quotes, or pass "-"
@@ -29,11 +36,11 @@ local cwd = vim.uv.cwd()
 local function out(s) io.stdout:write(s, '\n') end
 
 local VALUE = { ['-r'] = 'review', ['--review'] = 'review', ['--as'] = 'as', ['--title'] = 'title', ['--base'] = 'base',
-  ['--summary'] = 'summary', ['--timeout'] = 'timeout', ['--scope'] = 'scope' }
-local SWITCH = { ['--old'] = 'old', ['--open'] = 'open', ['--json'] = 'json' }
+  ['--summary'] = 'summary', ['--timeout'] = 'timeout', ['--scope'] = 'scope', ['--settle'] = 'settle' }
+local SWITCH = { ['--old'] = 'old', ['--open'] = 'open', ['--json'] = 'json', ['--live'] = 'live' }
 -- Positional arguments each command takes (after its name).
 local ARITY = { start = 0, ls = 0, status = 0, list = 0, show = 1, diff = 0, comment = 2, reply = 2, resolve = 1,
-  unresolve = 1, edit = 2, delete = 1, submit = 0, wait = 0, close = 0 }
+  unresolve = 1, edit = 2, delete = 1, submit = 0, wait = 0, close = 0, ack = 1, watch = 0 }
 
 -- Options may come before or after the command, as `--opt value` or `--opt=value`. `--` ends them, and an
 -- argument with spaces in it is always text.
@@ -107,6 +114,20 @@ local function thread(review, n)
   error(('no thread #%d in %s'):format(n, review.id), 0)
 end
 
+-- Seconds since the human last saved anything in the review (`at` is UTC, to the second).
+local function human_quiet(r)
+  local y, mo, d, h, mi, s = (r.human_last_at or ''):match('^(%d+)%-(%d+)%-(%d+)T(%d+):(%d+):(%d+)Z$')
+  if not y then return math.huge end
+  local then_ = os.time({ year = y, month = mo, day = d, hour = h, min = mi, sec = s, isdst = false })
+  return os.time(os.date('!*t')) - then_
+end
+
+-- One poll interval. vim.wait (not uv.sleep) keeps the event loop running, so SIGTERM still stops us.
+local function pause()
+  vim.wait(1000)
+  vim.uv.update_time()
+end
+
 local function who(c)
   return c.author == c.role and c.author or ('%s (%s)'):format(c.author, c.role)
 end
@@ -117,7 +138,8 @@ local function header(r)
     if t.resolved then resolved = resolved + 1 else open = open + 1 end
   end
   local turn = r.closed and 'closed' or r.turn and ("the %s's turn"):format(r.turn) or 'not submitted yet'
-  local s = ('%s · "%s" · base %s (%s) · %s\n  checkout: %s'):format(r.id, r.title, r.base:sub(1, 7), r.base_ref, turn, r.root)
+  local s = ('%s · "%s" · base %s (%s) · %s%s\n  checkout: %s'):format(r.id, r.title, r.base:sub(1, 7), r.base_ref, turn,
+    r.live and ' · live' or '', r.root)
   if #r.scope > 0 then s = s .. '\n  scope: ' .. table.concat(r.scope, ' ') end
   s = s .. ('\n  threads: %d open, %d resolved'):format(open, resolved)
   local last = r.last_submit
@@ -128,7 +150,8 @@ end
 local function format_thread(r, t, context)
   local last = t.comments[#t.comments]
   local status = t.resolved and 'resolved' or t.outdated and 'outdated' or 'open'
-  if not t.resolved and last.role ~= 'agent' then status = status .. ' · needs your reply' end
+  if t.needs_agent then status = status .. ' · needs your reply' end
+  if t.ack and not t.resolved and not t.needs_agent then status = status .. ' · ' .. t.ack.author .. ' is on it' end
   local where = t.outdated and ('%s (was line %d; that code changed)'):format(t.path, t.orig_line)
     or ('%s:%s%d%s'):format(t.path, t.start_line and (t.start_line .. '-') or '', t.line, t.side == 'old' and ' (base version)' or '')
   local lines = { ('#%d %s · %s'):format(t.n, status, where) }
@@ -193,7 +216,7 @@ function C.start(o)
   local root = toplevel()
   local others = store.list(cwd, root)
   local log = store.start(root, {
-    title = o.title, base = o.base, scope = #o.scope > 0 and o.scope or nil, author = author(o), role = 'agent',
+    title = o.title, base = o.base, scope = #o.scope > 0 and o.scope or nil, author = author(o), role = 'agent', live = o.live,
   })
   local r = store.load(log, 'agent')
   out(('Started review %s (base %s, %s).'):format(r.id, r.base:sub(1, 7), r.base_ref))
@@ -276,7 +299,8 @@ function C.submit(o)
   local r, log = open_review(o)
   store.append(log, { type = 'submit', author = author(o, r), role = 'agent', summary = o.summary })
   out('Submitted. The human can review it with:\n  critique ' .. store.handle(store.load(log, 'agent')))
-  out(('Next: critique wait -r %s'):format(r.id))
+  out(r.live and ('Next: listen for comments: critique wait -r %s (returns once one needs you), or critique watch -r %s'):format(r.id, r.id)
+    or ('Next: critique wait -r %s'):format(r.id))
 end
 
 function C.wait(o)
@@ -287,28 +311,113 @@ function C.wait(o)
     error(("you have %d unsubmitted change(s) (on #%s), and the human can't see them yet. Run: critique submit -r %s --summary '...'")
       :format(#r.drafts, table.concat(vim.fn.uniq(r.drafts), ', #'), r.id), 0)
   end
-  if r.started_by == 'agent' and not r.last_submit then
+  if r.started_by == 'agent' and not r.last_submit and not r.live then
     error(('nothing has been submitted yet, so the human has nothing to review. Run critique submit -r %s first.'):format(r.id), 0)
   end
   local deadline = vim.uv.now() + (tonumber(o.timeout) or 540) * 1000
+  local settle = tonumber(o.settle) or 20
   while true do
     r = store.load(log, 'agent')
     if r.closed then return out('The review was closed.') end
-    if r.turn == 'agent' then
+    local ready = r.turn == 'agent'
+    if r.live then
+      -- Live: once a comment needs you and the human has stopped saving for --settle seconds (related comments
+      -- come together). A submit only counts if it's newer than your last action; live replies need no submit.
+      local submitted = r.last_submit and r.last_submit.role == 'human' and r.last_submit.seq > r.agent_last_seq
+      local needed = vim.iter(r.threads):any(function(t) return t.needs_agent end)
+      ready = (submitted or needed) and human_quiet(r) >= settle
+    end
+    if ready then
       print_threads(r, { open = true, json = o.json }, 2)
       if o.json then return end
       local open = #vim.tbl_filter(function(t) return not t.resolved end, r.threads)
-      return out('\n' .. (open > 0
-        and ("Next: address each thread above (change the code, reply, or resolve), then critique submit -r %s --summary '...'")
+      return out('\n' .. (open > 0 and r.live
+        and ('Next: for each thread, critique ack -r %s <n> first, then change the code, reply, or resolve. No submit needed; then listen again with critique wait -r %s.')
+          :format(r.id, r.id)
+        or open > 0 and ("Next: address each thread above (change the code, reply, or resolve), then critique submit -r %s --summary '...'")
           :format(r.id)
         or ('No open threads. If the summary says the review is done, run critique close -r %s.'):format(r.id)))
     end
     if vim.uv.now() > deadline then
-      out(("The human hasn't submitted yet. Run critique wait -r %s again."):format(r.id))
+      out((r.live and 'Nothing needs you yet. Run critique wait -r %s again.' or "The human hasn't submitted yet. Run critique wait -r %s again."):format(r.id))
       os.exit(2)
     end
-    vim.uv.sleep(1000)
-    vim.uv.update_time()
+    pause()
+  end
+end
+
+function C.ack(o)
+  local r, log = open_review(o)
+  local t = thread(r, o.pos[1])
+  store.append(log, { type = 'ack', thread = t.id, author = author(o, r), role = 'agent' })
+  out(("Marked #%d: you're on it. Reply or resolve when done."):format(t.n))
+end
+
+-- The human's events after `since`, as one line each, once they are visible to the agent (drafts are not).
+local function human_lines(log, since, printed)
+  local r = store.load(log, 'agent')
+  local by_comment, lines = {}, {}
+  for _, t in ipairs(r.threads) do
+    for _, c in ipairs(t.comments) do by_comment[c.id] = { t = t, c = c } end
+  end
+  local function first(s) return (s or ''):match('^[^\r\n]*') end
+  local events = store.events(log) -- one snapshot: what we report and how far we got must agree
+  for _, ev in ipairs(events) do
+    local hit = ev.id and by_comment[ev.id]
+    if ev.role == 'human' and ev.type == 'comment' and hit and not printed[ev.id] then
+      printed[ev.id] = true
+      local t = hit.t
+      table.insert(lines, ev.thread == ev.id
+        and ('#%d new · %s:%s · %s: %s'):format(t.n, t.path, t.line or t.orig_line, ev.author, first(hit.c.body))
+        or ('#%d reply · %s: %s'):format(t.n, ev.author, first(hit.c.body)))
+    elseif ev.seq > since and ev.role ~= 'agent' then
+      if ev.type == 'edit' and hit and hit.c.role == 'human' then
+        table.insert(lines, ('#%d edited · %s: %s'):format(hit.t.n, hit.c.author, first(ev.body)))
+      elseif ev.type == 'delete' and printed[ev.id] and hit == nil and ev.role == 'human' then -- only ones the agent saw
+        table.insert(lines, ('a comment was deleted by %s'):format(ev.author or 'the human'))
+      elseif ev.type == 'resolve' then
+        for _, t in ipairs(r.threads) do
+          if t.id == ev.thread then table.insert(lines, ('#%d %s by %s'):format(t.n, ev.resolved and 'resolved' or 'reopened', ev.author)) end
+        end
+      elseif ev.type == 'submit' then
+        table.insert(lines, ('%s submitted%s'):format(ev.author, ev.summary and (': ' .. ev.summary) or ''))
+      elseif ev.type == 'live' then
+        table.insert(lines, ev.live and 'live mode on' or 'live mode off: comments wait for a submit again')
+      elseif ev.type == 'close' then
+        table.insert(lines, 'review closed')
+      end
+    end
+  end
+  return lines, #events, r
+end
+
+-- Streams the human's activity: a batch of lines once they've stopped saving for --settle seconds. Starts with
+-- the threads already waiting for you (so restarting it loses nothing), and ends when the review closes.
+function C.watch(o)
+  local log = review_log(o)
+  local settle = tonumber(o.settle) or 20
+  local printed, since, pending = {}, #store.events(log), {}
+  local r = store.load(log, 'agent')
+  for _, t in ipairs(r.threads) do
+    for _, c in ipairs(t.comments) do printed[c.id] = true end
+    if t.needs_agent then
+      local c = t.comments[#t.comments]
+      table.insert(pending, ('#%d waiting · %s:%s · %s: %s'):format(t.n, t.path, t.line or t.orig_line, c.author, (c.body:match('^[^\r\n]*'))))
+    end
+  end
+  io.stdout:setvbuf('line')
+  while true do
+    local lines, seen
+    lines, seen, r = human_lines(log, since, printed)
+    since = seen
+    vim.list_extend(pending, lines)
+    if #pending > 0 and (human_quiet(r) >= settle or r.closed) then
+      for _, l in ipairs(pending) do out(l) end
+      if not r.closed then out(('(critique list -r %s --open for the code and full comments)'):format(r.id)) end
+      pending = {}
+    end
+    if r.closed then return end
+    pause()
   end
 end
 

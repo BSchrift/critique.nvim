@@ -124,7 +124,8 @@ agent when you save it, and it gets to work right away:
 - It starts once you've stopped saving comments for about 20 seconds, so related comments arrive together
   and it doesn't act on one you're about to edit. Until then the thread shows `· sent`.
 - The thread it's working on shows `⏳ claude is on it`, and Neovim tells you when it replies or resolves.
-- Replying to a resolved thread reopens it. `:Critique submit` is optional; use it to say "that's all for now".
+- Replying to a resolved thread reopens it (even a "thanks", so the agent takes another look).
+  `:Critique submit` is optional; use it to say "that's all for now".
 
 **Setup: none beyond the skill.** Ask for it ("…hand it to me for review in critique, live"), or turn
 it on yourself in an open review with `:Critique live` (run it again to turn it off). The agent has to be
