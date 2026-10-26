@@ -44,8 +44,11 @@ Review GitHub pull requests in Neovim, inside a real checkout of the PR.
 [lazy.nvim](https://github.com/folke/lazy.nvim):
 
 ```lua
-{ 'BSchrift/critique.nvim', cmd = 'Critique' }
+{ 'BSchrift/critique.nvim' }
 ```
+
+There's no need to lazy-load it: at startup it only defines the `:Critique` command, which adds
+a few hundredths of a millisecond. Lazy-loading would also hide `:help critique` until the first `:Critique`.
 
 Other plugin managers work the same way: add `BSchrift/critique.nvim`. There's no `setup()` call
 and nothing to configure.
