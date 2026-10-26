@@ -1,8 +1,111 @@
 # critique.nvim
 
-Review GitHub pull requests in Neovim, inside a real checkout of the PR.
+Code review in Neovim, for **your AI agent's changes** and for **GitHub pull requests**.
 
-![critique.nvim demo](demo/demo.gif)
+- **Review your agent's work like a pull request.** The agent hands you its changes as a review.
+  You comment on lines in Neovim, the agent answers in the same threads, fixes things, and hands it
+  back. It works with Claude Code, Codex, Cursor, and any other agent that can run shell commands.
+  Everything stays on your machine.
+- **Review GitHub PRs inside a real checkout.** You get a GitHub-style diff on the real files, while
+  your LSP, telescope, and `gd` keep working. Comments sync to GitHub as you write them.
+
+## Features
+
+**In every review**
+- GitHub-style diff drawn over the real files: green additions, red deleted lines shown as virtual
+  lines, and the changed words inside a line highlighted. The buffer is always the real file, so your
+  LSP, telescope, `gd`, grep, and formatters keep working in changed files and the rest of the repo.
+- Line numbers you can comment on are tinted gray-blue. `]c` / `[c` jump between changes, and the
+  changed files are in the quickfix list.
+- Comment on a line or a visual range in a markdown buffer. Read and reply to threads, edit your
+  drafts, resolve, delete. Threads show inline at the end of their line, with their number (`#2`).
+- `:Critique before` / `:Critique after` switch between the old and new version of a file at the same
+  spot, and you can comment on deleted lines there. `:Critique toggle` hides the overlay.
+- `:help critique`, `:Critique help`, and `critique -h`.
+
+**Reviewing your AI agent**
+- A turn-based loop: the agent submits, you review and submit, the agent fixes and answers, repeat.
+  The agent can also review *your* changes.
+- Works with any agent that can run shell commands. A skill teaches Claude Code, Codex, Cursor, and
+  others the loop, and the CLI's output is written for agents to read (`--json` too).
+- Neovim refreshes and tells you when the agent submits or closes the review. Threads follow their
+  code as the agent edits it; if the code is gone, the thread stays put, marked *outdated*.
+- Comment on any line of any file, not just the diff. Drafts stay private until you submit.
+- Review handles you can paste (`critique <id>`, `#3` to jump to a thread), or just run `critique` in a repo.
+- Several agents at once, one worktree each, or limited to paths with `--scope`.
+- Everything stays in the repo (`.critique/`, ignored by git). It works offline and inside agent sandboxes.
+
+**Reviewing GitHub pull requests**
+- Open any PR link, including links to a file, line, or comment, and critique jumps there.
+- Comments go to a pending GitHub review as you save them. Submit as Comment, Approve, or Request changes.
+- Read and reply to other reviewers' threads, and resolve them.
+- `:Critique link` copies a permalink to the current line or range.
+- Private repos and GitHub Enterprise work through your existing `gh` login, with no extra setup.
+- Each repo is cloned once (blobless), and each PR gets its own worktree, so reopening is fast.
+
+## Review your AI agent's changes
+
+![critique.nvim with Claude Code](demo/agent.gif)
+
+<sub>Demo in full quality: [demo/agent.mp4](demo/agent.mp4)</sub>
+
+1. **You ask the agent** for a change and say to hand it to you in critique.
+2. **The agent** starts a local review, makes the change, and gives you a command like
+   `critique cart-minimum-3f9a`.
+3. **You run it.** Neovim opens the agent's changes with the same diff view and comment threads as a
+   GitHub PR. Comment on any line, then `:Critique submit`.
+4. **The agent** is waiting for that submit. It reads your threads, fixes the code, replies, resolves
+   what it fixed, and submits again. Neovim refreshes and tells you it's your turn.
+5. **Repeat** until you submit with nothing left open.
+
+It works the other way round too: ask the agent to review *your* changes with critique, and its
+comments show up in Neovim. Reviews live in `.critique/` inside the repo, which git ignores, and
+never touch GitHub.
+
+### Set up your agent (once)
+
+First [install critique](#install), including the `critique` command (step 3). Agents talk to it
+through that command. Then give your agent the critique skill, which teaches it the review loop:
+
+| Agent | Install the skill |
+|---|---|
+| **Claude Code** | `mkdir -p ~/.claude/skills && ln -s ~/.local/share/nvim/lazy/critique.nvim/skills/critique ~/.claude/skills/critique` |
+| **Codex, Cursor**, and other agents that read `~/.agents/skills` | `mkdir -p ~/.agents/skills && ln -s ~/.local/share/nvim/lazy/critique.nvim/skills/critique ~/.agents/skills/critique` |
+| **Any other agent** (Gemini CLI, Aider, …) | Paste [skills/critique/SKILL.md](skills/critique/SKILL.md), without the `---` header, into its instructions file (`AGENTS.md`, `GEMINI.md`, …) |
+
+Linking instead of copying keeps the skill up to date when the plugin updates. To set it up for one
+repo only, link it into that repo's `.claude/skills/` or `.agents/skills/` instead. If your plugin
+manager isn't lazy.nvim, adjust the plugin path as in step 3.
+
+### Use it
+
+Ask for a change the way you normally would, and mention critique:
+
+> Make FIVEOFF require a $10 minimum order. Hand it to me for review with critique and iterate on my comments.
+
+> Review my changes on this branch with critique.
+
+You can also use critique without asking the agent first. Run `critique` in a repo to start a review of
+your branch's changes, leave comments for the agent, submit, then tell it "address my critique comments".
+
+**Handles.** Each review has an id like `cart-minimum-3f9a`. `critique <id>` opens it from any
+directory, `critique <id>#3` jumps to thread #3, and `critique` with no argument opens the one in the
+current repo (or lets you pick). `critique ls` lists them. If the agent's sandbox can't write outside
+the repo, its handle looks like `<id>@<path>`, which works from anywhere. In zsh with `extendedglob`
+set, quote a handle that has `#`: `critique 'cart-minimum-3f9a#3'`.
+
+**Several agents at once.** Give each agent its own git worktree, so each review shows only that
+agent's changes. Agents sharing one checkout can limit their review to some paths with
+`critique start --scope <path>`.
+
+**For agents (and scripts).** `critique -h` lists the commands: `start`, `submit`, `wait`, `list`,
+`diff`, `reply`, `resolve`, `comment`, and so on. They print plain text meant for agents to read, and
+`list`, `show`, and `wait` also print JSON with `--json`. Outside a terminal, `critique` never opens
+Neovim, so an agent can't get stuck in it. The [skill](skills/critique/SKILL.md) describes the loop.
+
+## Review GitHub pull requests
+
+![critique.nvim reviewing a GitHub PR](demo/demo.gif)
 
 <sub>Demo in full quality: [demo/demo.mp4](demo/demo.mp4)</sub>
 
@@ -20,63 +123,16 @@ Review GitHub pull requests in Neovim, inside a real checkout of the PR.
 - **Share a line.** `:Critique link` copies a permalink to the line you're on.
 - **GitHub Enterprise.** Works with self-hosted GitHub. critique takes the host from the PR URL.
 
-## Getting started
-
-### 1. Requirements
-
-- Neovim **0.11+**
-- `git`
-- [GitHub CLI](https://cli.github.com) (`brew install gh`), logged in:
-
-  ```sh
-  gh auth login
-  ```
-
-  critique uses gh for everything: fetching the PR, cloning private repos, and posting comments.
-  It doesn't need its own token.
-
-  For **GitHub Enterprise Server**, log in to your company's host once:
-  `gh auth login --hostname github.yourcompany.com`. The `critique` launcher prompts you
-  to do this the first time you open a PR from a new host.
-
-### 2. Install the plugin
-
-[lazy.nvim](https://github.com/folke/lazy.nvim):
-
-```lua
-{ 'BSchrift/critique.nvim' }
-```
-
-There's no need to lazy-load it: at startup it only defines the `:Critique` command, which adds
-a few hundredths of a millisecond. Lazy-loading would also hide `:help critique` until the first `:Critique`.
-
-Other plugin managers work the same way: add `BSchrift/critique.nvim`. There's no `setup()` call
-and nothing to configure.
-
-### 3. Add the `critique` launcher (optional)
-
-This lets you start a review from your shell. It links the launcher into a directory on your `PATH`:
-
-```sh
-ln -s ~/.local/share/nvim/lazy/critique.nvim/bin/critique ~/.local/bin/critique
-```
-
-(Adjust the first path if your plugin manager installs somewhere else.)
-
-### 4. Review your first PR
-
 ```sh
 critique https://github.com/owner/repo/pull/123
 ```
 
-Or, from inside Neovim: `:Critique open https://github.com/owner/repo/pull/123`.
+Or from inside Neovim: `:Critique open https://github.com/owner/repo/pull/123`. Any PR link works,
+including links to a specific file, line, or comment (`…/pull/123/changes#diff-…R31`,
+`…/pull/123#discussion_r…`). critique opens the PR and jumps there.
 
-You can paste any PR link, including links copied from GitHub that point at a specific file,
-line, or comment (`…/pull/123/changes#diff-…R31`, `…/pull/123#discussion_r…`).
-critique opens the PR and jumps to that spot.
-
-The first time you open a repo, critique clones it, which takes a few seconds. Later opens only
-fetch new commits. Then:
+The first time you open a repo, critique clones it, which takes a few seconds. Later opens only fetch
+new commits. Then:
 
 1. **Find your way around.** The changed files are in the quickfix list (`:cnext` / `:cprev`), and
    `]c` / `[c` jump between changes in a file. You can open any other file with your usual tools.
@@ -94,7 +150,43 @@ fetch new commits. Then:
 Until you submit, your comments are a pending review: they're saved on GitHub but only you can see them.
 If you quit halfway, run `critique <url>` again and continue where you left off.
 
-### 5. Add keymaps (recommended)
+## Install
+
+### 1. Requirements
+
+- Neovim **0.11+**
+- `git`
+- For GitHub PRs only: the [GitHub CLI](https://cli.github.com) (`brew install gh`), logged in with
+  `gh auth login`. critique uses gh to fetch PRs, clone private repos, and post comments, so it
+  doesn't need its own token. For **GitHub Enterprise Server**, log in to your company's host once:
+  `gh auth login --hostname github.yourcompany.com`. The `critique` launcher prompts you to do this
+  the first time you open a PR from a new host.
+
+### 2. Install the plugin
+
+[lazy.nvim](https://github.com/folke/lazy.nvim):
+
+```lua
+{ 'BSchrift/critique.nvim' }
+```
+
+There's no need to lazy-load it: at startup it only defines the `:Critique` command, which adds
+a few hundredths of a millisecond. Lazy-loading would also hide `:help critique` until the first `:Critique`.
+
+Other plugin managers work the same way: add `BSchrift/critique.nvim`. There's no `setup()` call
+and nothing to configure.
+
+### 3. Add the `critique` command
+
+Agents need it, and you can use it to start reviews from your shell. Link it into a directory on your `PATH`:
+
+```sh
+ln -s ~/.local/share/nvim/lazy/critique.nvim/bin/critique ~/.local/bin/critique
+```
+
+(Adjust the first path if your plugin manager installs somewhere else.) `critique -h` shows everything it does.
+
+### 4. Add keymaps (recommended)
 
 critique doesn't set any keymaps other than `]c` / `[c` in changed files. Some suggestions:
 
@@ -113,25 +205,24 @@ vim.keymap.set('n', '<leader>cs', '<cmd>Critique submit<cr>', { desc = 'Critique
 
 | Command | What it does |
 |---|---|
-| `:Critique open <url>` | Fetch the PR, check it out, show the diff. If the URL links to a file, line, or comment, jump there |
+| `:Critique open <url or review>` | Open a GitHub PR (jumping to the file, line, or comment a link points at), or a local review by handle. With no argument: the local review in this repo |
 | `:Critique comment` | Comment on the cursor line, or open the thread already there |
 | `:'<,'>Critique comment` | Multi-line comment on a visual selection (always starts a new thread) |
 | `:Critique delete` | Delete one of your comments on the cursor line |
 | `:Critique resolve` | Resolve / unresolve the thread on the cursor line |
-| `:Critique before` | Show the file as it was before the PR, at the matching line |
-| `:Critique after` | Back to the PR's version of the file |
+| `:Critique before` | Show the file as it was before the change, at the matching line |
+| `:Critique after` | Back to the changed version of the file |
 | `:Critique toggle` | Hide / show the diff overlay |
-| `:Critique link` | Copy a permalink to the cursor line (or a visual selection's lines) |
+| `:Critique link` | Copy a GitHub permalink to the cursor line (or a visual selection's lines) |
 | `:Critique files` | Reopen the changed-files list |
-| `:Critique refresh` | Reload comments from GitHub |
-| `:Critique submit` | Publish your pending review |
+| `:Critique refresh` | Reload comments (and, in a local review, the diff) |
+| `:Critique submit` | GitHub: publish your pending review. Local: hand the turn to the agent |
 | `:Critique help` | Open the help (`:help critique`) |
 
-As on GitHub, you can comment only on lines inside a diff hunk: changed lines plus 3 lines
-of context around them. Their line numbers are tinted gray-blue.
+On GitHub, you can comment only on lines inside a diff hunk: changed lines plus 3 lines of context
+around them. Their line numbers are tinted gray-blue. Local reviews have no such limit.
 
-Full documentation is in Neovim: `:help critique` (or `:Critique help`). For the shell launcher's
-options, run `critique -h`.
+Full documentation is in Neovim: `:help critique` (or `:Critique help`). `critique -h` covers the shell command.
 
 `:Critique link` builds a `https://<host>/<owner>/<repo>/blob/<commit>/<path>#L<n>` permalink.
 The host comes from the PR URL, so self-hosted GitHub works without any setup. The link points
@@ -142,15 +233,20 @@ clipboard provider, it goes to the unnamed register only, so `p` pastes it.
 
 ## How it works
 
-- Each repo is cloned once, blobless, to `~/.cache/nvim/critique/<host>/<owner>/<repo>/repo.git`.
-  Each PR gets a git worktree next to it, at `.../pr-<number>`. Neovim's working directory
-  is set to that worktree, which is why every other tool just works.
-- Reopening a PR fetches new commits and checks out the PR head. If you've edited files in the
-  worktree, the checkout refuses instead of overwriting them.
-- The diff is `git diff <merge-base> <head>` with GitHub's settings: 3 context lines, rename
-  detection, Myers algorithm. Your git config can't change the hunks.
-- Removed lines are drawn as virtual lines, so the buffer is always the real file on disk.
-- Comments go through GitHub's GraphQL API via `gh api graphql`.
+- **GitHub PRs:** each repo is cloned once, blobless, to
+  `~/.cache/nvim/critique/<host>/<owner>/<repo>/repo.git`, and each PR gets a git worktree next to
+  it at `.../pr-<number>`. Neovim's working directory is set to that worktree, which is why every
+  other tool just works. Reopening a PR fetches new commits and checks out the PR head; if you've
+  edited files in the worktree, the checkout refuses instead of overwriting them. Comments go through
+  GitHub's GraphQL API via `gh api graphql`.
+- **Local reviews:** a review is an append-only log at `.critique/reviews/<id>.jsonl` in the checkout,
+  shared by Neovim and the `critique` command. The diff is the review's base commit (fixed when the
+  review starts) against the working tree, including uncommitted and untracked files. Each comment
+  stores the code it's on, so threads follow that code as the agent edits; if the code is gone, the
+  thread becomes *outdated*. Neovim watches the log and refreshes when the agent submits.
+- **Both:** the diff is `git diff` with GitHub's settings (3 context lines, rename detection, Myers
+  algorithm), so your git config can't change the hunks. Removed lines are drawn as virtual lines,
+  so the buffer is always the real file on disk.
 
 ## Troubleshooting
 
@@ -158,12 +254,14 @@ clipboard provider, it goes to the unnamed register only, so `p` pastes it.
 |---|---|
 | `To get started with GitHub CLI, please run: gh auth login` | Run `gh auth login`. The `critique` launcher offers to do this for you. |
 | `GitHub only accepts comments on lines inside one diff hunk` | Comment on a changed line or within 3 lines of one. For deleted lines, use `:Critique before`. |
-| `save or undo your edits first` | Comments are placed by line number, so the buffer must match the PR. Undo (`u`) or `:e!`. |
+| `save or undo your edits first` | Comments are placed by line number, so the buffer must match the file. Undo (`u`) or `:e!`. |
 | Reopening fails with a checkout error | You changed files in the worktree. Go to `~/.cache/nvim/critique/<host>/<owner>/<repo>/pr-<n>` and `git stash` or `git checkout .`. |
 | LSP errors about missing dependencies | The worktree is a fresh checkout. Install the project's dependencies there as you would for any clone. |
-| A thread I expect isn't shown | Outdated threads (on code that has since changed) are hidden, as on GitHub's Files tab. |
+| A thread I expect isn't shown | On GitHub, outdated threads (on code that has since changed) are hidden, as on GitHub's Files tab. Local reviews show them, marked *outdated*. |
 | `HTTP 401` or `authentication required` for a company host | Run `gh auth login --hostname <your GitHub host>`. |
 | `:Critique link` says "no system clipboard" | Neovim found no clipboard tool. The link is in the unnamed register (`p` pastes it). See `:help clipboard`. |
+| `no review <id> here` | Run it from inside the repo, or use the `<id>@<path>` form. `critique ls` (in the repo) lists reviews. |
+| The agent doesn't use critique | Check the skill is installed for that agent (above), and mention critique in your request. |
 | Using too much disk | Delete `~/.cache/nvim/critique` (or one `<host>/<owner>/<repo>` inside it). |
 
 ## Customizing colors
@@ -177,14 +275,17 @@ To override them, define these highlight groups in your config:
 
 ## Limits
 
-- Loads up to 100 review threads per PR, and up to 100 comments per thread.
-- Assumes one review is open at a time per Neovim instance.
+- GitHub: loads up to 100 review threads per PR, and up to 100 comments per thread.
+- One review is open at a time per Neovim instance.
+- Agents sharing one checkout and editing the same file can't have their changes told apart. Use one worktree per agent.
 
 ## Development
 
 ```sh
-nvim --headless -l tests/diff_test.lua   # diff parser and rendering tests
-vhs demo/demo.tape                       # re-record the demo (needs vhs; edit the PR URL first)
+tests/run.sh               # every test, offline (unit tests, plus the CLI and Neovim UI against temp repos)
+tests/run.sh cli local     # just some of them
+vhs demo/demo.tape         # re-record the GitHub demo (needs vhs; edit the PR URL first)
+vhs demo/agent.tape        # re-record the agent demo (needs vhs and Claude Code)
 ```
 
 ## License
