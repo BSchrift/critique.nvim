@@ -8,6 +8,7 @@ Review GitHub pull requests in Neovim, inside a real checkout of the PR.
 
 - **GitHub-style diff over the real files.** Added lines are green, removed lines appear as red
   virtual lines, and changed words are highlighted, using the same hunks as GitHub's Files tab.
+  Line numbers you can comment on are tinted gray-blue.
 - **Everything else keeps working.** It's a normal checkout, so your LSP, telescope, `gd`,
   grep, and formatters all work as usual, in PR files and in the rest of the repo.
 - **Comments sync as you write them.** Each `:w` saves a comment to your pending review on GitHub.
@@ -121,9 +122,13 @@ vim.keymap.set('n', '<leader>cs', '<cmd>Critique submit<cr>', { desc = 'Critique
 | `:Critique files` | Reopen the changed-files list |
 | `:Critique refresh` | Reload comments from GitHub |
 | `:Critique submit` | Publish your pending review |
+| `:Critique help` | Open the help (`:help critique`) |
 
 As on GitHub, you can comment only on lines inside a diff hunk: changed lines plus 3 lines
-of context around them.
+of context around them. Their line numbers are tinted gray-blue.
+
+Full documentation is in Neovim: `:help critique` (or `:Critique help`). For the shell launcher's
+options, run `critique -h`.
 
 `:Critique link` builds a `https://<host>/<owner>/<repo>/blob/<commit>/<path>#L<n>` permalink.
 The host comes from the PR URL, so self-hosted GitHub works without any setup. The link points
@@ -164,7 +169,8 @@ The defaults use GitHub's diff colors and pick the light or dark set based on `b
 To override them, define these highlight groups in your config:
 
 `CritiqueAdd`, `CritiqueAddWord`, `CritiqueAddSign`, `CritiqueDelete`, `CritiqueDeleteWord`,
-`CritiqueDeleteSign`, `CritiqueThread`, `CritiquePending`, `CritiqueResolved`
+`CritiqueDeleteSign`, `CritiqueHunk` (tinted line numbers), `CritiqueThread`, `CritiquePending`,
+`CritiqueResolved`
 
 ## Limits
 

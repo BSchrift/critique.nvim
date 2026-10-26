@@ -63,12 +63,14 @@ local buf = vim.api.nvim_create_buf(false, true)
 vim.api.nvim_buf_set_lines(buf, 0, -1, false, { 'local x = 1', 'return x + 2', 'end', 'keep', 'added' })
 local ns = vim.api.nvim_create_namespace('test')
 diff.render(buf, a, 'RIGHT', ns)
-local lines_hl, virt = {}, {}
+local lines_hl, virt, numbers = {}, {}, {}
 for _, m in ipairs(vim.api.nvim_buf_get_extmarks(buf, ns, 0, -1, { details = true })) do
   if m[4].line_hl_group then lines_hl[#lines_hl + 1] = m[2] end
+  if m[4].number_hl_group then numbers[#numbers + 1] = m[2] end
   if m[4].virt_lines then virt[m[2]] = m[4].virt_lines[1][1][1] .. (m[4].virt_lines[1][2] or { '' })[1] end
 end
 eq(lines_hl, { 1, 4 }, 'added rows highlighted')
+eq(numbers, { 0, 1, 2, 3, 4 }, 'every row of the hunk is marked commentable')
 eq({ virt[1], virt[3] }, { 'return x + 1', 'gone' .. (' '):rep(500) }, 'deleted lines as virtual lines')
 
 print('ok')

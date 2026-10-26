@@ -1,0 +1,219 @@
+*critique.txt*  Review GitHub pull requests inside a real checkout of the PR
+
+                                                    *critique* *critique.nvim*
+
+critique.nvim checks a pull request out locally and opens it in your normal
+Neovim. A GitHub-style diff is drawn over the real files, so your LSP,
+telescope, `gd`, grep, and formatters all keep working. Comments sync to a
+pending review on GitHub as you save them, and `:Critique submit` publishes
+them all at once.
+
+1. Requirements                                    |critique-requirements|
+2. Quick start                                     |critique-quickstart|
+3. Commands                                        |critique-commands|
+4. Comment buffers                                 |critique-comments|
+5. The diff overlay                                |critique-overlay|
+6. Links                                           |critique-links|
+7. Highlights                                      |critique-highlights|
+8. How it works                                    |critique-internals|
+9. Troubleshooting                                 |critique-troubleshooting|
+
+==============================================================================
+1. Requirements                                        *critique-requirements*
+
+- Neovim 0.11+
+- git
+- GitHub CLI (https://cli.github.com), logged in: >sh
+    gh auth login
+<
+  For GitHub Enterprise Server, log in to your company's host: >sh
+    gh auth login --hostname github.yourcompany.com
+<
+critique uses `gh` for everything: fetching the PR, cloning private repos,
+and posting comments. There is no setup() call and nothing to configure.
+
+==============================================================================
+2. Quick start                                           *critique-quickstart*
+
+From the shell, with the `critique` launcher on your PATH (see the README): >sh
+    critique https://github.com/owner/repo/pull/123
+<
+Or from inside Neovim: >vim
+    :Critique open https://github.com/owner/repo/pull/123
+<
+Then:
+1. Move between changed files with the quickfix list (`:cnext`, `:cprev`), and
+   between changes in a file with `]c` / `[c`.
+2. On a line, `:Critique comment`, write below the ▼ line, `:w`, `:q`.
+3. When done, `:Critique submit`.
+
+Until you submit, comments are a pending review: saved on GitHub, visible
+only to you. Quit any time and run the same command to continue.
+
+==============================================================================
+3. Commands                                     *:Critique* *critique-commands*
+
+:Critique open {url}                                         *:Critique-open*
+    Fetch the PR, check it out in a worktree, set the working directory
+    there, and show the diff. Any PR link works, including links to a file,
+    line, or comment copied from GitHub; critique jumps there: >
+      .../pull/123/changes#diff-<hash>R31     line 31 of that file
+      .../pull/123/files#diff-<hash>L12       line 12 of the old version
+      .../pull/123#discussion_r<id>           that review comment
+<
+:Critique comment                                         *:Critique-comment*
+    Comment on the cursor line. If the line already has a thread, open it
+    instead, to read it and reply, or to edit your pending comment.
+    See |critique-comments|.
+
+:{range}Critique comment
+    Comment on several lines, e.g. after selecting them in Visual mode.
+    Always starts a new thread.
+
+:Critique delete                                           *:Critique-delete*
+    Delete one of your comments on the cursor line. Asks which one.
+
+:Critique resolve                                         *:Critique-resolve*
+    Resolve the thread on the cursor line, or unresolve it if resolved.
+
+:Critique before                                           *:Critique-before*
+    Show the file as it was before the PR, at the matching line. Comment
+    here to comment on deleted lines.
+
+:Critique after                                             *:Critique-after*
+    Back to the PR's version of the file.
+
+:Critique toggle                                           *:Critique-toggle*
+    Hide or show the diff overlay (|critique-overlay|).
+
+:[range]Critique link                                        *:Critique-link*
+    Copy a permalink to the cursor line, or to the lines in [range].
+    See |critique-links|.
+
+:Critique files                                             *:Critique-files*
+    Reopen the quickfix list of changed files.
+
+:Critique refresh                                         *:Critique-refresh*
+    Reload comments from GitHub.
+
+:Critique submit                                           *:Critique-submit*
+    Publish your pending review as Comment, Approve, or Request changes,
+    with an optional summary.
+
+:Critique help                                               *:Critique-help*
+    Open this help.
+
+                                                               *critique-]c*
+]c  [c      In a changed file, jump to the next / previous change.
+
+critique sets no other mappings. Some suggestions: >lua
+    vim.keymap.set({ 'n', 'x' }, '<leader>cc', ':Critique comment<cr>')
+    vim.keymap.set({ 'n', 'x' }, '<leader>cl', ':Critique link<cr>')
+    vim.keymap.set('n', '<leader>ct', '<cmd>Critique toggle<cr>')
+    vim.keymap.set('n', '<leader>cs', '<cmd>Critique submit<cr>')
+<
+==============================================================================
+4. Comment buffers                                         *critique-comments*
+
+`:Critique comment` opens a markdown buffer in a split. It shows the thread
+so far, then a line:
+    <!-- ▼ write below · :w saves to your pending review · :q closes ▼ -->
+Write your comment below it. `:w` saves it to your pending review on GitHub;
+saving again updates the same comment. `:q` closes the buffer.
+
+As on GitHub, you can only comment on lines inside a diff hunk: changed lines
+plus up to 3 lines of context around them. Their line numbers are tinted
+(|hl-CritiqueHunk|). To comment on a deleted line, use `:Critique before`.
+
+Comments are placed by line number, so `:Critique comment` refuses while the
+buffer has unsaved edits.
+
+==============================================================================
+5. The diff overlay                                         *critique-overlay*
+
+On the PR's version of a file:
+- added lines have a green background and a `+` sign
+- deleted lines appear as red virtual lines above where they were
+- within a changed line, the changed words are a darker shade
+- line numbers you can comment on are tinted gray-blue
+- threads appear at the end of their line: 💬, then the comment count and
+  the first comment
+
+`:Critique before` shows the reverse: deletions in place, additions virtual.
+The buffer is always the real file, so other plugins see the real file.
+
+==============================================================================
+6. Links                                                      *critique-links*
+
+`:Critique link` builds a permalink: >
+    https://<host>/<owner>/<repo>/blob/<commit>/<path>#L<n>
+<
+The host comes from the PR URL, so self-hosted GitHub needs no setup. The
+link points at the commit you are looking at: the PR head, or in
+`:Critique before` the base commit (and the file's old path if it was
+renamed). It works for any file in the repo, not only files in the PR.
+
+The link goes to the system clipboard (|quoteplus|) and the unnamed register.
+Without a clipboard provider, it goes to the unnamed register only.
+
+==============================================================================
+7. Highlights                                            *critique-highlights*
+
+The defaults are GitHub's diff colors, picked for 'background'. Override any
+group in your config, e.g. >lua
+    vim.api.nvim_set_hl(0, 'CritiqueHunk', { fg = '#7a88a8', bg = '#262a38' })
+<
+*hl-CritiqueAdd*          Added lines
+*hl-CritiqueAddWord*      Changed words within added lines
+*hl-CritiqueAddSign*      The `+` sign
+*hl-CritiqueDelete*       Deleted lines
+*hl-CritiqueDeleteWord*   Changed words within deleted lines
+*hl-CritiqueDeleteSign*   The `-` sign (in `:Critique before`)
+*hl-CritiqueHunk*         Line numbers of lines you can comment on
+*hl-CritiqueThread*       Open threads
+*hl-CritiquePending*      Threads containing your pending comments
+*hl-CritiqueResolved*     Resolved threads
+
+==============================================================================
+8. How it works                                           *critique-internals*
+
+- Each repo is cloned once, blobless, to
+  `~/.cache/nvim/critique/<host>/<owner>/<repo>/repo.git`, and each PR gets a
+  git worktree next to it at `.../pr-<number>`. Reopening fetches new commits
+  and checks out the PR head; if you edited files in the worktree, the
+  checkout refuses instead of overwriting them.
+- The diff is `git diff <merge-base> <head>` with GitHub's settings: 3 lines
+  of context, rename detection, Myers algorithm. Your git config can't change
+  the hunks.
+- Comments go through GitHub's GraphQL API via `gh api graphql`.
+- Loads up to 100 threads per PR and 100 comments per thread. Outdated
+  threads (on code that has since changed) are hidden, as on GitHub's Files
+  tab.
+
+==============================================================================
+9. Troubleshooting                                   *critique-troubleshooting*
+
+"gh auth login" / HTTP 401 ~
+    Run `gh auth login`, or `gh auth login --hostname <host>` for a company
+    GitHub.
+
+"GitHub only accepts comments on lines inside one diff hunk" ~
+    Comment on a line with a tinted number. For deleted lines, use
+    `:Critique before`.
+
+"save or undo your edits first" ~
+    Undo (`u`) or reload (`:e!`), so line numbers match the PR.
+
+Reopening fails with a checkout error ~
+    You changed files in the worktree. In
+    `~/.cache/nvim/critique/<host>/<owner>/<repo>/pr-<n>`, run `git stash`
+    or `git checkout .`.
+
+LSP errors about missing dependencies ~
+    The worktree is a fresh checkout. Install the project's dependencies
+    there, as for any clone.
+
+Disk space ~
+    Delete `~/.cache/nvim/critique`, or one `<host>/<owner>/<repo>` in it.
+
+ vim:tw=78:ts=8:ft=help:norl:

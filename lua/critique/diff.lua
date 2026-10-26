@@ -182,6 +182,13 @@ local SIDES = {
 
 function M.render(buf, file, side, ns)
   local s, last, ts = SIDES[side], vim.api.nvim_buf_line_count(buf), vim.bo[buf].tabstop
+  -- Tint the line numbers GitHub accepts comments on: every line of every hunk on this side.
+  for _, h in ipairs(file.hunks) do
+    local first = h[s.key .. '_start']
+    for l = math.max(first, 1), math.min(first + h[s.key .. '_count'] - 1, last) do
+      vim.api.nvim_buf_set_extmark(buf, ns, l - 1, 0, { number_hl_group = 'CritiqueHunk' })
+    end
+  end
   for _, b in ipairs(file.blocks) do
     for _, l in ipairs(b[s.mine]) do
       local row = math.min(l[s.key], last) - 1

@@ -29,10 +29,12 @@ local COLORS = {
   dark = {
     CritiqueAdd = { bg = '#12261e' }, CritiqueAddWord = { bg = '#1a4a29' }, CritiqueAddSign = { fg = '#3fb950' },
     CritiqueDelete = { bg = '#301b1e' }, CritiqueDeleteWord = { bg = '#6b2b2b' }, CritiqueDeleteSign = { fg = '#f85149' },
+    CritiqueHunk = { fg = '#8197b8', bg = '#232d3f' }, -- line numbers you can comment on
   },
   light = {
     CritiqueAdd = { bg = '#e6ffec' }, CritiqueAddWord = { bg = '#abf2bc' }, CritiqueAddSign = { fg = '#1a7f37' },
     CritiqueDelete = { bg = '#ffebe9' }, CritiqueDeleteWord = { bg = '#ffcecb' }, CritiqueDeleteSign = { fg = '#cf222e' },
+    CritiqueHunk = { fg = '#57728f', bg = '#e3ebf5' },
   },
 }
 
@@ -426,6 +428,7 @@ function cmds.link(o)
   end
 end
 
+function cmds.help() vim.cmd.help('critique') end
 function cmds.before() swap('LEFT') end
 function cmds.after() swap('RIGHT') end
 cmds.refresh = refresh
@@ -433,7 +436,7 @@ cmds.refresh = refresh
 function M.command(o)
   local sub = o.fargs[1]
   if not cmds[sub] then return notify('unknown subcommand: ' .. sub, vim.log.levels.ERROR) end
-  if not S and sub ~= 'open' then return notify('no review open; run :Critique open <url>', vim.log.levels.ERROR) end
+  if not S and sub ~= 'open' and sub ~= 'help' then return notify('no review open; run :Critique open <url>', vim.log.levels.ERROR) end
   gh.async(cmds[sub])(o)
 end
 
