@@ -4,7 +4,7 @@ Code review in Neovim, for **your AI agent's changes** and for **GitHub pull req
 
 ![critique.nvim with Claude Code](demo/agent.gif)
 
-**[▸ Review your AI agent's work](#review-your-ai-agents-changes)** &nbsp;·&nbsp; **[▸ Review GitHub pull requests](#review-github-pull-requests)**
+**[▸ Review GitHub pull requests](#review-github-pull-requests)** &nbsp;·&nbsp; **[▸ Review your AI agent's work](#review-your-ai-agents-changes)**
 
 - **Review your agent's work like a pull request.** The agent hands you its changes as a review.
   You comment on lines in Neovim, the agent answers in the same threads, fixes things, and hands it
@@ -49,80 +49,6 @@ Code review in Neovim, for **your AI agent's changes** and for **GitHub pull req
 - `:Critique link` copies a permalink to the current line or range.
 - Private repos and GitHub Enterprise work through your existing `gh` login, with no extra setup.
 - Each repo is cloned once (blobless), and each PR gets its own worktree, so reopening is fast.
-
-## Review your AI agent's changes
-
-![critique.nvim with Claude Code](demo/agent.gif)
-
-<sub>Demo in full quality: [demo/agent.mp4](demo/agent.mp4)</sub>
-
-1. **You ask the agent** for a change and say to hand it to you in critique.
-2. **The agent** starts a local review, makes the change, and gives you a command like
-   `critique cart-minimum-3f9a`.
-3. **You run it.** Neovim opens the agent's changes with the same diff view and comment threads as a
-   GitHub PR. Comment on any line, then `:Critique submit`.
-4. **The agent** is waiting for that submit. It reads your threads, fixes the code, replies, resolves
-   what it fixed, and submits again. Neovim refreshes and tells you it's your turn.
-5. **Repeat** until you submit with nothing left open.
-
-It works the other way round too: ask the agent to review *your* changes with critique, and its
-comments show up in Neovim. Reviews live in `.critique/` inside the repo, which git ignores, and
-never touch GitHub.
-
-### Live reviews: the agent reacts as you comment
-
-Normally the agent waits until you `:Critique submit`. In a **live** review, each comment goes to the
-agent when you save it, and it gets to work right away:
-
-- It waits until you've paused for about 20 seconds, so it doesn't start on a comment you're still writing.
-- The thread it's working on shows `⏳ claude is on it`, and Neovim tells you when it replies or resolves.
-- `:Critique submit` is optional; use it to say "that's all for now".
-
-**Setup: none beyond the skill.** Ask for it ("…hand it to me for review in critique, live"), or turn
-it on yourself in an open review with `:Critique live` (run it again to turn it off). Agents that can
-run commands in the background (Claude Code) react even while they're busy with something else; other
-agents react as soon as they finish their current step.
-
-### Set up your agent (once)
-
-First [install critique](#install), including the `critique` command (step 3). Agents talk to it
-through that command. Then give your agent the critique skill, which teaches it the review loop:
-
-| Agent | Install the skill |
-|---|---|
-| **Claude Code** | `mkdir -p ~/.claude/skills && ln -s ~/.local/share/nvim/lazy/critique.nvim/skills/critique ~/.claude/skills/critique` |
-| **Codex, Cursor**, and other agents that read `~/.agents/skills` | `mkdir -p ~/.agents/skills && ln -s ~/.local/share/nvim/lazy/critique.nvim/skills/critique ~/.agents/skills/critique` |
-| **Any other agent** (Gemini CLI, Aider, …) | Paste [skills/critique/SKILL.md](skills/critique/SKILL.md), without the `---` header, into its instructions file (`AGENTS.md`, `GEMINI.md`, …) |
-
-Linking instead of copying keeps the skill up to date when the plugin updates. To set it up for one
-repo only, link it into that repo's `.claude/skills/` or `.agents/skills/` instead. If your plugin
-manager isn't lazy.nvim, adjust the plugin path as in step 3.
-
-### Use it
-
-Ask for a change the way you normally would, and mention critique:
-
-> Make FIVEOFF require a $10 minimum order. Hand it to me for review with critique and iterate on my comments.
-
-> Review my changes on this branch with critique.
-
-You can also use critique without asking the agent first. Run `critique` in a repo to start a review of
-your branch's changes, leave comments for the agent, submit, then tell it "address my critique comments".
-
-**Handles.** Each review has an id like `cart-minimum-3f9a`. `critique <id>` opens it from any
-directory, `critique <id>#3` jumps to thread #3, and `critique` with no argument opens the one in the
-current repo (or lets you pick). `critique ls` lists them. If the agent's sandbox can't write outside
-the repo, its handle looks like `<id>@<path>`, which works from anywhere. In zsh with `extendedglob`
-set, quote a handle that has `#`: `critique 'cart-minimum-3f9a#3'`.
-
-**Several agents at once.** Give each agent its own git worktree, so each review shows only that
-agent's changes. Agents sharing one checkout can limit their review to some paths with
-`critique start --scope <path>`.
-
-**For agents (and scripts).** `critique -h` lists the commands: `start`, `submit`, `wait`, `watch`,
-`ack`, `list`, `diff`, `reply`, `resolve`, `comment`, and so on. They print plain text meant for agents to read, and
-`list`, `show`, and `wait` also print JSON with `--json`. Outside a terminal, `critique` never opens
-Neovim, so an agent can't get stuck in it. The [skill](skills/critique/SKILL.md) describes the loop.
 
 ## Review GitHub pull requests
 
@@ -170,6 +96,81 @@ new commits. Then:
 
 Until you submit, your comments are a pending review: they're saved on GitHub but only you can see them.
 If you quit halfway, run `critique <url>` again and continue where you left off.
+
+## Review your AI agent's changes
+
+![critique.nvim with Claude Code](demo/agent.gif)
+
+<sub>Demo in full quality: [demo/agent.mp4](demo/agent.mp4)</sub>
+
+1. **You ask the agent** for a change and say to hand it to you in critique.
+2. **The agent** starts a local review, makes the change, and gives you a command like
+   `critique cart-minimum-3f9a`.
+3. **You run it.** Neovim opens the agent's changes with the same diff view and comment threads as a
+   GitHub PR. Comment on any line, then `:Critique submit`.
+4. **The agent** is waiting for that submit. It reads your threads, fixes the code, replies, resolves
+   what it fixed, and submits again. Neovim refreshes and tells you it's your turn.
+5. **Repeat** until you submit with nothing left open.
+
+It works the other way round too: ask the agent to review *your* changes with critique, and its
+comments show up in Neovim. Reviews live in `.critique/` inside the repo, which git ignores, and
+never touch GitHub.
+
+### Live reviews: the agent reacts as you comment
+
+Normally the agent waits until you `:Critique submit`. In a **live** review, each comment goes to the
+agent when you save it, and it gets to work right away:
+
+- It starts once you've stopped saving comments for about 20 seconds, so related comments arrive together
+  and it doesn't act on one you're about to edit. Until then the thread shows `· sent`.
+- The thread it's working on shows `⏳ claude is on it`, and Neovim tells you when it replies or resolves.
+- Replying to a resolved thread reopens it. `:Critique submit` is optional; use it to say "that's all for now".
+
+**Setup: none beyond the skill.** Ask for it ("…hand it to me for review in critique, live"), or turn
+it on yourself in an open review with `:Critique live` (run it again to turn it off). The agent has to be
+listening for your comments: Claude Code listens in the background and reacts even mid-task; other agents
+react when they finish their current step. If the agent has stopped, tell it "watch my critique comments".
+
+### Set up your agent (once)
+
+First [install critique](#install), including the `critique` command (step 3). Agents talk to it
+through that command. Then give your agent the critique skill, which teaches it the review loop:
+
+| Agent | Install the skill |
+|---|---|
+| **Claude Code** | `mkdir -p ~/.claude/skills && ln -s ~/.local/share/nvim/lazy/critique.nvim/skills/critique ~/.claude/skills/critique` |
+| **Codex, Cursor**, and other agents that read `~/.agents/skills` | `mkdir -p ~/.agents/skills && ln -s ~/.local/share/nvim/lazy/critique.nvim/skills/critique ~/.agents/skills/critique` |
+| **Any other agent** (Gemini CLI, Aider, …) | Paste [skills/critique/SKILL.md](skills/critique/SKILL.md), without the `---` header, into its instructions file (`AGENTS.md`, `GEMINI.md`, …) |
+
+Linking instead of copying keeps the skill up to date when the plugin updates. To set it up for one
+repo only, link it into that repo's `.claude/skills/` or `.agents/skills/` instead. If your plugin
+manager isn't lazy.nvim, adjust the plugin path as in step 3.
+
+### Use it
+
+Ask for a change the way you normally would, and mention critique:
+
+> Make FIVEOFF require a $10 minimum order. Hand it to me for review with critique and iterate on my comments.
+
+> Review my changes on this branch with critique.
+
+You can also use critique without asking the agent first. Run `critique` in a repo to start a review of
+your branch's changes, leave comments for the agent, submit, then tell it "address my critique comments".
+
+**Handles.** Each review has an id like `cart-minimum-3f9a`. `critique <id>` opens it from any
+directory, `critique <id>#3` jumps to thread #3, and `critique` with no argument opens the one in the
+current repo (or lets you pick). `critique ls` lists them. If the agent's sandbox can't write outside
+the repo, its handle looks like `<id>@<path>`, which works from anywhere. In zsh with `extendedglob`
+set, quote a handle that has `#`: `critique 'cart-minimum-3f9a#3'`.
+
+**Several agents at once.** Give each agent its own git worktree, so each review shows only that
+agent's changes. Agents sharing one checkout can limit their review to some paths with
+`critique start --scope <path>`.
+
+**For agents (and scripts).** `critique -h` lists the commands: `start`, `submit`, `wait`, `watch`,
+`ack`, `list`, `diff`, `reply`, `resolve`, `comment`, and so on. They print plain text meant for agents to read, and
+`list`, `show`, and `wait` also print JSON with `--json`. Outside a terminal, `critique` never opens
+Neovim, so an agent can't get stuck in it. The [skill](skills/critique/SKILL.md) describes the loop.
 
 ## Install
 
