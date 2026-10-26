@@ -55,6 +55,8 @@ eq({ diff.map_line(b, 10, 'new', 'old'), diff.map_line(b, 9, 'old', 'new'), diff
 eq({ r.path, r.old_path, r.status, r.hunks[1].old_count }, { 'new name.txt', 'old name.txt', 'R', 1 }, 'rename')
 eq({ d.path, d.status, d.blocks[1].dels[1].text, d.blocks[1].new }, { 'gone.txt', 'D', '-- x', 0 }, 'deleted file')
 eq({ diff.word_diff('foo(bar)', 'completely different') }, { {}, {} }, 'dissimilar lines get no word highlight')
+eq({ diff.word_diff('', 'x = 1') }, { {}, {} }, 'blank line replaced by text')
+eq({ diff.word_diff('x = 1', '') }, { {}, {} }, 'text replaced by blank line')
 
 -- Render the head side of a.lua and check what lands where.
 local buf = vim.api.nvim_create_buf(false, true)

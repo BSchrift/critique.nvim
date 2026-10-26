@@ -15,6 +15,7 @@ end
 
 -- Changed byte ranges {start, end} (0-based, end exclusive) between two lines, by word.
 function M.word_diff(a, b)
+  if a == '' or b == '' then return {}, {} end -- no words to compare; also, zero tokens would still diff as one line
   local ta, tb = tokenize(a), tokenize(b)
   local function offsets(t)
     local o = { 0 }
