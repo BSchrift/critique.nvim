@@ -26,6 +26,18 @@ Code review in Neovim, for **your AI agent's changes** and for **GitHub pull req
   drafts, resolve, delete. Threads show inline at the end of their line, with their number (`#2`).
 - `:Critique before` / `:Critique after` switch between the old and new version of a file at the same
   spot, and you can comment on deleted lines there. `:Critique toggle` hides the overlay.
+- **Suggest changes by editing the code.** Edit a file and `:w`: a window previews your edits, and `y`
+  posts them as suggestions (GitHub's "Commit suggestion" for PRs, or exact code for the agent). Nothing
+  is written to disk.
+- `:Critique threads` lists the open threads at the bottom (who's waiting on whom, pending, outdated);
+  `]q` / `[q` go from one to the next. `:Critique files` switches back to the changed files.
+- `:Critique viewed` marks a file viewed (✓ in the file list, with a count) and moves on to the next one.
+  A viewed file that changes shows ● until you look again. On GitHub it's the same "Viewed" checkbox
+  as on the website.
+- `:Critique since` shows only what changed since your last review: new commits since your last GitHub
+  review, or what the agent changed since your last submit.
+- `:Critique overview` shows what the review is about: the PR's description, checks, and conversation,
+  or the agent's submit summaries.
 - `:help critique`, `:Critique help`, and `critique -h`.
 
 **Reviewing your AI agent**
@@ -86,6 +98,7 @@ new commits. Then:
 2. **Comment.** Put the cursor on a line and run `:Critique comment`. A markdown buffer opens.
    Write below the `▼` line, then `:w` to save the comment to your pending review and `:q` to close.
    For a multi-line comment, select the lines in visual mode first.
+   Or just edit the code and `:w`: critique offers your edits as suggestions.
 3. **Reply or edit.** Run `:Critique comment` on a line that already has a thread. You'll see
    the whole thread and can reply, or edit your pending comment.
 4. **Look back.** `:Critique before` shows the file as it was before the PR (comment there to
@@ -93,6 +106,8 @@ new commits. Then:
 5. **Share a line.** `:Critique link` copies a permalink to the cursor line (or a visual
    selection) to your clipboard, ready to paste into Slack or a ticket.
 6. **Submit.** `:Critique submit` asks for Comment / Approve / Request changes and an optional summary.
+7. **Come back.** When the PR has new commits since your review, critique says so when you open it;
+   `:Critique since` shows only those. `:Critique overview` shows the description, checks, and conversation.
 
 Until you submit, your comments are a pending review: they're saved on GitHub but only you can see them.
 If you quit halfway, run `critique <url>` again and continue where you left off.
@@ -107,9 +122,11 @@ If you quit halfway, run `critique <url>` again and continue where you left off.
 2. **The agent** starts a local review, makes the change, and gives you a command like
    `critique cart-minimum-3f9a`.
 3. **You run it.** Neovim opens the agent's changes with the same diff view and comment threads as a
-   GitHub PR. Comment on any line, then `:Critique submit`.
+   GitHub PR. Comment on any line, or edit the code and `:w` to suggest exactly what you want
+   (`:w!` writes the change yourself). Then `:Critique submit`.
 4. **The agent** is waiting for that submit. It reads your threads, fixes the code, replies, resolves
-   what it fixed, and submits again. Neovim refreshes and tells you it's your turn.
+   what it fixed, and submits again. Neovim refreshes and tells you it's your turn. `:Critique since`
+   shows only what it changed since your submit.
 5. **Repeat** until you submit with nothing left open.
 
 It works the other way round too: ask the agent to review *your* changes with critique, and its
@@ -196,8 +213,18 @@ Neovim, so an agent can't get stuck in it. The [skill](skills/critique/SKILL.md)
 There's no need to lazy-load it: at startup it only defines the `:Critique` command, which adds
 a few hundredths of a millisecond. Lazy-loading would also hide `:help critique` until the first `:Critique`.
 
-Other plugin managers work the same way: add `BSchrift/critique.nvim`. There's no `setup()` call
-and nothing to configure.
+Other plugin managers work the same way: add `BSchrift/critique.nvim`. Nothing needs configuring.
+To follow tagged releases instead of the latest commit, add `version = '*'` (see the
+[changelog](CHANGELOG.md)).
+
+The one option: `:w` in a review file asks to post your edits as suggestions. To have `:w` save as
+usual instead (and use `:Critique suggest` when you want suggestions), turn it off:
+
+```lua
+{ 'BSchrift/critique.nvim', opts = { auto_suggest = false } }
+```
+
+Turn it off if you use an auto-save plugin that saves as you type; see `:help critique-suggestions`.
 
 ### 3. Add the `critique` command
 
@@ -221,6 +248,7 @@ end, { desc = 'Critique: before/after' })
 vim.keymap.set('n', '<leader>ct', '<cmd>Critique toggle<cr>', { desc = 'Critique: toggle diff' })
 vim.keymap.set({ 'n', 'x' }, '<leader>cl', ':Critique link<cr>', { desc = 'Critique: copy link to line' })
 vim.keymap.set('n', '<leader>cr', '<cmd>Critique resolve<cr>', { desc = 'Critique: resolve thread' })
+vim.keymap.set('n', '<leader>cv', '<cmd>Critique viewed<cr>', { desc = 'Critique: mark file viewed' })
 vim.keymap.set('n', '<leader>cs', '<cmd>Critique submit<cr>', { desc = 'Critique: submit review' })
 ```
 
@@ -237,6 +265,11 @@ vim.keymap.set('n', '<leader>cs', '<cmd>Critique submit<cr>', { desc = 'Critique
 | `:Critique after` | Back to the changed version of the file |
 | `:Critique toggle` | Hide / show the diff overlay |
 | `:Critique link` | Copy a GitHub permalink to the cursor line (or a visual selection's lines) |
+| `:Critique viewed` | Mark the file viewed (or, in the file list, the file under the cursor) and go to the next one; again to unmark |
+| `:Critique since` | Show only what changed since your last review (again: all changes) |
+| `:Critique overview` | Description, checks, and conversation (local: the submit summaries) |
+| `:Critique suggest` | Preview your unsaved edits in this file and post them as suggestions (what `:w` does by default) |
+| `:Critique threads` | List the open threads at the bottom; `]q` / `[q` go through them |
 | `:Critique files` | Reopen the changed-files list |
 | `:Critique refresh` | Reload comments (and, in a local review, the diff) |
 | `:Critique submit` | GitHub: publish your pending review. Local: hand the turn to the agent |

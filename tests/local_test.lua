@@ -1036,4 +1036,326 @@ H.test('opening a review announces nothing that happened before', function()
   for i = before + 1, #messages do H.lacks(messages[i].msg, 'submitted', 'announced an old submit') end
 end)
 
+
+H.section('changes since your last review, and the overview')
+local function submit_as_human()
+  local input = vim.ui.input
+  vim.ui.input = function(_, cb) cb('') end
+  local ok, err = pcall(critique, 'submit', "the agent's turn")
+  vim.ui.input = input
+  assert(ok, err)
+end
+local function agent_submits(root)
+  local before = #messages
+  H.run(root, { 'submit', '--as', 'claude' })
+  H.wait_for(function()
+    for i = before + 1, #messages do if messages[i].msg:find('claude submitted', 1, true) then return true end end
+  end, 'the submit notification')
+end
+local function qf_files()
+  return vim.tbl_map(function(q) return vim.api.nvim_buf_get_name(q.bufnr):match('cart/.*') end, vim.fn.getqflist())
+end
+local function added_lines()
+  local rows = {}
+  for _, m in ipairs(marks(ns_diff)) do
+    if m[4].line_hl_group == 'CritiqueAdd' then table.insert(rows, m[2] + 1) end
+  end
+  return rows
+end
+
+H.test(':Critique since needs a submit of yours to compare with', function()
+  local _, id = setup()
+  open(id)
+  H.has(critique_error('since'), 'nothing to compare yet')
+end)
+H.test(":Critique since shows only what the agent changed after your submit, follows its edits, and toggles back", function()
+  local root, id, log = setup()
+  open(id)
+  submit_as_human()
+  H.ok(store.load(log, 'human').reviewed_tree, 'the submit saved a snapshot')
+  critique('since', 'nothing changed since your last review')
+  -- The agent changes another line of cart.go and adds a file.
+  local fixed = vim.deepcopy(CODE)
+  fixed[4], fixed[8] = '\treturn a + b + 0', '\treturn a - b - 0'
+  H.write(root, 'cart/cart.go', fixed)
+  H.write(root, 'cart/fee.go', { 'package cart' })
+  agent_submits(root)
+  H.has(last_msg(), ':Critique since shows what changed')
+  critique('since', 'changed since your last review')
+  H.has(last_msg(), '2 files changed since your last review')
+  H.eq(qf_files(), { 'cart/cart.go', 'cart/fee.go' })
+  H.has(vim.fn.getqflist({ title = 0 }).title, 'since your last review')
+  H.eq({ vim.api.nvim_buf_get_name(0):match('cart/.*'), added_lines() }, { 'cart/cart.go', { 8 } }, 'line 4 changed before your review')
+  goto_line(1)
+  vim.cmd('normal ]c')
+  H.eq(vim.fn.line('.'), 8, ']c jumps to the new change only')
+  -- More edits while it's on: the view follows them.
+  H.write(root, 'cart/tax.go', { 'package cart' })
+  agent_submits(root)
+  H.eq(qf_files(), { 'cart/cart.go', 'cart/fee.go', 'cart/tax.go' })
+  critique('since', 'showing all changes')
+  H.eq(qf_files(), { 'cart/cart.go', 'cart/fee.go', 'cart/new.go', 'cart/tax.go' })
+  vim.cmd.edit(root .. '/cart/cart.go')
+  H.eq(added_lines(), { 4, 8 })
+end)
+H.test(':Critique overview shows the review and every submit summary', function()
+  local root, id = setup()
+  H.run(root, { 'submit', '--summary', 'Added a zero', '--as', 'claude' })
+  open(id)
+  critique('overview')
+  H.eq(vim.api.nvim_buf_get_name(0), 'critique://overview')
+  local text = table.concat(vim.api.nvim_buf_get_lines(0, 0, -1, false), '\n')
+  H.has(text, '# ' .. id .. ' · Cart fix\nbase `HEAD` (')
+  H.has(text, ' · your turn\n\n## Conversation\n\n### claude submitted · ')
+  H.has(text, '\n\nAdded a zero')
+  H.eq(vim.bo.modifiable, false)
+  critique('overview')
+  H.eq(#vim.tbl_filter(function(b) return vim.api.nvim_buf_get_name(b) == 'critique://overview' end, vim.api.nvim_list_bufs()), 1,
+    'opening it again replaces it')
+end)
+
+H.section('viewed files')
+local function qf_texts()
+  return vim.tbl_map(function(q) return vim.api.nvim_buf_get_name(q.bufnr):match('cart/.*') .. ' ' .. q.text end, vim.fn.getqflist())
+end
+H.test(':Critique viewed marks the file, moves on to the next unviewed one, and counts', function()
+  local root, id = setup()
+  open(id)
+  critique('viewed', '1/2 viewed')
+  H.eq(qf_texts(), { 'cart/cart.go ✓ M  +1 -1', 'cart/new.go A  +3 -0' })
+  H.has(vim.fn.getqflist({ title = 0 }).title, 'Cart fix · 1/2 viewed')
+  H.eq(vim.api.nvim_buf_get_name(0):match('cart/.*'), 'cart/new.go', 'moved on to the next unviewed file')
+  critique('viewed', 'all 2 files viewed · :Critique submit')
+  -- The agent changes a file you viewed: it shows as changed since you viewed it.
+  local changed = vim.deepcopy(CODE)
+  changed[4] = '\treturn a + b + 1'
+  H.write(root, 'cart/cart.go', changed)
+  critique('refresh')
+  H.eq(qf_texts(), { 'cart/cart.go ● M  +1 -1', 'cart/new.go ✓ A  +3 -0' })
+  H.has(vim.fn.getqflist({ title = 0 }).title, ' · 1/2 viewed')
+  H.lacks(H.run(root, { 'list' }), 'viewed', 'the agent never sees viewed marks')
+  vim.cmd.edit(root .. '/README.md')
+  H.has(critique_error('viewed'), 'not a changed file in this review')
+end)
+H.test('in the file list, :Critique viewed toggles the entry under the cursor and stays in the list', function()
+  local _, id = setup()
+  open(id)
+  vim.cmd('copen')
+  goto_line(2)
+  critique('viewed', '1/2 viewed')
+  H.eq({ vim.bo.buftype, vim.fn.line('.') }, { 'quickfix', 1 }, 'on the next unviewed entry, wrapping around')
+  H.eq(qf_texts(), { 'cart/cart.go M  +1 -1', 'cart/new.go ✓ A  +3 -0' })
+  goto_line(2)
+  critique('viewed', 'not viewed: cart/new.go · 0/2 viewed')
+  H.eq(qf_texts()[2], 'cart/new.go A  +3 -0')
+  H.eq(vim.fn.getqflist({ title = 0 }).title:find('viewed'), nil, 'no count once nothing is viewed')
+end)
+
+H.section('open threads')
+local function qf_lines()
+  return vim.tbl_map(function(q) return vim.api.nvim_buf_get_name(q.bufnr):match('cart/.*') .. ':' .. q.lnum .. ' ' .. q.text end, vim.fn.getqflist())
+end
+local function here_now() return vim.api.nvim_buf_get_name(0):match('cart/.*') .. ':' .. vim.fn.line('.') end
+
+H.test(':Critique threads lists open threads in file order; ]q goes through them; the list holds still as you resolve', function()
+  local root, id = setup()
+  H.run(root, { 'comment', 'cart/new.go:3', 'Fee too low?', '--as', 'claude' })
+  H.run(root, { 'comment', 'cart/cart.go:4', 'Why + 0?', '--as', 'claude' })
+  H.run(root, { 'submit', '--as', 'claude' })
+  open(id)
+  goto_line(8)
+  critique('comment')
+  write_comment('Also here')
+  critique('threads')
+  H.eq(qf_lines(), {
+    'cart/cart.go:4 #2 (1) · claude: Why + 0? · needs your reply',
+    'cart/cart.go:8 #3 (1) · Tester: Also here · pending',
+    'cart/new.go:3 #1 (1) · claude: Fee too low? · needs your reply',
+  })
+  H.eq(vim.fn.getqflist({ title = 0 }).title, id .. ' · Cart fix · 3 open threads · 2 need your reply')
+  H.eq(here_now(), 'cart/cart.go:4', 'jumps to the first one')
+  vim.cmd('normal ]q')
+  H.eq(here_now(), 'cart/cart.go:8')
+  critique('resolve', 'thread resolved')
+  H.eq(qf_lines()[2], 'cart/cart.go:8 ✓ #3 (1) · Tester: Also here · resolved', 'stays in the list, marked resolved')
+  H.has(vim.fn.getqflist({ title = 0 }).title, '· 2 open threads')
+  vim.cmd('normal ]q')
+  H.eq(here_now(), 'cart/new.go:3', ']q carries on from where you were')
+  -- A thread that appears later goes at the end.
+  H.run(root, { 'comment', 'cart/cart.go:1', 'Package doc?', '--as', 'claude' })
+  agent_submits(root)
+  H.eq(qf_lines()[4], 'cart/cart.go:1 #4 (1) · claude: Package doc? · needs your reply')
+  H.eq(vim.fn.getqflist({ idx = 0 }).idx, 3, 'still where you were')
+  critique('threads')
+  H.eq(#qf_lines(), 3, 'starting afresh drops the resolved one')
+  critique('files')
+  H.eq(qf_lines(), { 'cart/cart.go:4 M  +1 -1', 'cart/new.go:1 A  +3 -0' })
+end)
+H.test(':Critique threads with none open says so', function()
+  local _, id = setup()
+  open(id)
+  critique('threads', 'no open threads')
+end)
+H.test(':Critique files and threads bring the review\'s list back when another list is in front', function()
+  local _, id = setup()
+  open(id)
+  vim.fn.setqflist({}, ' ', { title = 'grep results', items = { { filename = H.tmp .. '/x', lnum = 1, text = 'x' } } })
+  critique('files')
+  H.eq(vim.fn.getqflist({ title = 0 }).title, id .. ' · Cart fix')
+end)
+H.test('your place in the file list survives a refresh', function()
+  local _, id = setup()
+  open(id)
+  vim.cmd('cnext')
+  critique('refresh')
+  H.eq(vim.fn.getqflist({ idx = 0 }).idx, 2)
+end)
+
+H.test("a thread on the old version is listed and jumped to at its own line (loading that version doesn't shift it)", function()
+  local root, id = setup()
+  H.run(root, { 'comment', 'cart/cart.go:8', '--old', 'Was this tested?', '--as', 'claude' })
+  H.run(root, { 'submit', '--as', 'claude' })
+  open(id)
+  critique('threads')
+  H.eq({ vim.api.nvim_buf_get_name(0), vim.fn.line('.'), vim.fn.getqflist()[1].lnum },
+    { 'critique://base/cart/cart.go', 8, 8 })
+end)
+
+H.section('suggestions from your edits')
+local function float()
+  for _, w in ipairs(vim.api.nvim_list_wins()) do
+    if vim.api.nvim_win_get_config(w).relative ~= '' then return w end
+  end
+end
+-- :w (or `cmd`) and wait for the suggestion window; returns its lines and title.
+local function ask(cmd)
+  vim.cmd(cmd or 'write')
+  H.wait_for(float, 'the suggestion window')
+  local w = float()
+  return vim.api.nvim_buf_get_lines(vim.api.nvim_win_get_buf(w), 0, -1, false), vim.api.nvim_win_get_config(w).title[1][1]
+end
+local function press(key)
+  vim.api.nvim_feedkeys(key, 'x', false)
+  H.wait_for(function() return not float() end, 'the window to close')
+end
+local function edit_cart(root)
+  vim.cmd.edit(root .. '/cart/cart.go')
+  vim.api.nvim_buf_set_lines(0, 7, 8, false, { '\treturn b - a' }) -- change line 8
+  vim.api.nvim_buf_set_lines(0, 5, 6, false, {}) -- delete line 6
+  vim.api.nvim_buf_set_lines(0, 1, 1, false, { '// Package cart adds and subtracts.' }) -- insert after line 1
+end
+local function disk(root) return vim.fn.readfile(root .. '/cart/cart.go') end
+
+H.test(':w shows your edits as suggestions; y posts them like comments and puts the file back', function()
+  local root, id, log = setup()
+  open(id)
+  local before = disk(root)
+  edit_cart(root)
+  local lines, title = ask()
+  H.eq(title, ' Suggest 3 changes? ')
+  H.eq(lines, {
+    'cart/cart.go:1', '  package cart', '+ // Package cart adds and subtracts.', '',
+    'cart/cart.go:6', '- ', '',
+    'cart/cart.go:8', '- \treturn a - b', '+ \treturn b - a',
+  })
+  press('y')
+  H.wait_for(function() return last_msg():find('suggestions', 1, true) end, 'the posted message')
+  H.has(last_msg(), 'saved 3 suggestions; the agent sees them after :Critique submit')
+  H.eq({ vim.api.nvim_buf_get_lines(0, 0, -1, false), vim.bo.modified, disk(root) }, { before, false, before },
+    'the buffer is back to the file, which was never written')
+  local threads = store.load(log, 'human').threads
+  H.eq(vim.tbl_map(function(t) return { t.line, t.code, t.comments[1].body, t.comments[1].pending } end, threads), {
+    { 1, { 'package cart' }, '```suggestion\npackage cart\n// Package cart adds and subtracts.\n```', true },
+    { 6, { '' }, '```suggestion\n```', true },
+    { 8, { '\treturn a - b' }, '```suggestion\n\treturn b - a\n```', true },
+  })
+  H.has(thread_texts()[1][2], '#1 (1) · Tester: 💡 suggested a change')
+  submit_as_human()
+  H.has(H.run(root, { 'list' }), '```suggestion')
+end)
+H.test('n cancels: nothing is posted and your edits stay', function()
+  local root, id, log = setup()
+  open(id)
+  edit_cart(root)
+  ask()
+  press('n')
+  H.eq({ #store.load(log, 'human').threads, vim.bo.modified, vim.api.nvim_buf_get_lines(0, 7, 8, false) }, { 0, true, { '\treturn b - a' } })
+end)
+H.test('in a live review, y sends the suggestions right away', function()
+  local root, id, log = setup()
+  store.append(log, { type = 'live', live = true, role = 'human' })
+  open(id)
+  vim.cmd.edit(root .. '/cart/cart.go')
+  vim.api.nvim_buf_set_lines(0, 7, 8, false, { '\treturn b - a' })
+  ask()
+  press('y')
+  H.wait_for(function() return last_msg():find('sent 1 suggestion', 1, true) end, 'the sent message')
+  H.eq(#store.load(log, 'agent').threads, 1, 'the agent sees it without a submit')
+end)
+H.test(':w! in a local review writes the file for real, and :w to another file is a plain copy', function()
+  local root, id = setup()
+  open(id)
+  vim.cmd.edit(root .. '/cart/cart.go')
+  vim.api.nvim_buf_set_lines(0, 7, 8, false, { '\treturn b - a' })
+  vim.cmd('write ' .. vim.fn.fnameescape(H.tmp .. '/copy.go'))
+  H.eq({ vim.fn.readfile(H.tmp .. '/copy.go')[8], vim.bo.modified, float() }, { '\treturn b - a', true, nil })
+  vim.cmd('write!')
+  H.eq({ disk(root)[8], vim.bo.modified }, { '\treturn b - a', false })
+  vim.api.nvim_buf_set_lines(0, 0, 1, false, { 'package shop' })
+  ask() -- :w still asks afterwards
+  press('n')
+end)
+H.test('a big edit fits on screen and scrolls', function()
+  local root, id = setup()
+  open(id)
+  vim.cmd.edit(root .. '/cart/cart.go')
+  local many = {}
+  for i = 1, 300 do many[i] = 'var x' .. i .. ' = ' .. i end
+  vim.api.nvim_buf_set_lines(0, 8, 8, false, many)
+  local lines = ask()
+  local cfg = vim.api.nvim_win_get_config(float())
+  H.ok(#lines > 300 and cfg.height <= vim.o.lines - 8, ('height %d for %d lines'):format(cfg.height, #lines))
+  H.has(cfg.footer[1][1], 'j/k scroll')
+  vim.cmd('normal! G')
+  H.eq(vim.fn.line('.'), #lines, 'the window scrolls to the end')
+  press('n')
+end)
+H.test(':wa asks about each edited file in turn', function()
+  local root, id, log = setup()
+  open(id)
+  vim.cmd.edit(root .. '/cart/new.go')
+  vim.api.nvim_buf_set_lines(0, 2, 3, false, { 'var Fee = 7' })
+  vim.cmd.edit(root .. '/cart/cart.go')
+  vim.api.nvim_buf_set_lines(0, 7, 8, false, { '\treturn b - a' })
+  ask('wall')
+  press('y')
+  H.wait_for(float, 'the second window')
+  press('y')
+  H.wait_for(function() return #store.load(log, 'human').threads == 2 end, 'both posted')
+end)
+H.test('with auto_suggest off, :w writes as usual and :Critique suggest asks', function()
+  local root, id, log = setup()
+  require('critique').setup({ auto_suggest = false })
+  local ok, err = pcall(function()
+    open(id)
+    vim.cmd.edit(root .. '/cart/cart.go')
+    vim.api.nvim_buf_set_lines(0, 7, 8, false, { '\treturn b - a' })
+    vim.cmd('Critique suggest')
+    H.wait_for(float, 'the suggestion window')
+    press('y')
+    H.wait_for(function() return #store.load(log, 'human').threads == 1 end, 'the suggestion')
+    vim.api.nvim_buf_set_lines(0, 0, 1, false, { 'package shop' })
+    vim.cmd('write')
+    H.eq({ disk(root)[1], float() }, { 'package shop', nil })
+  end)
+  require('critique').setup({ auto_suggest = true })
+  assert(ok, err)
+end)
+H.test(':Critique suggest with no edits says so', function()
+  local root, id = setup()
+  open(id)
+  vim.cmd.edit(root .. '/cart/cart.go')
+  critique('suggest', 'no edits to suggest in cart/cart.go')
+end)
+
 H.done()

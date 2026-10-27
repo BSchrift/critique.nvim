@@ -37,6 +37,7 @@ local function read_lines(path)
   f:close()
   return split_lines(s)
 end
+M.read_lines = read_lines
 
 local function rand(n)
   return (vim.uv.random(n):gsub('.', function(c) return ('%02x'):format(c:byte()) end))
@@ -126,14 +127,14 @@ end
 -- Comments from the other side since the viewer's last submit are marked `new`.
 -- In a live review, comments are published as they are written: there are no drafts.
 function M.load(log, viewer)
-  local review = { log = log, root = log:match('^(.*)/%.critique/reviews/[^/]+$'), threads = {}, closed = false, live = false }
+  local review = { log = log, root = log:match('^(.*)/%.critique/reviews/[^/]+$'), threads = {}, closed = false, live = false, viewed = {} }
   local threads, comments, drafts, my_submit, resolves = {}, {}, {}, 0, {}
   local mine = {} -- per thread: the viewer's last comment, ack, or resolve there
   review.agent_last_seq = 0 -- the agent's last action of any kind
   for seq, ev in ipairs(M.events(log)) do
     if ev.role == 'agent' and ev.author then review.agent_author = ev.author end
     if ev.role == 'agent' and ev.type ~= 'start' then review.agent_last_seq = seq end
-    if ev.role == 'human' then review.human_last_at = ev.at end
+    if ev.role == 'human' and ev.type ~= 'viewed' then review.human_last_at = ev.at end -- viewed marks never reach the agent
     if ev.role == viewer and (ev.thread or (ev.type == 'comment' and ev.id)) then mine[ev.thread or ev.id] = seq end
     if ev.type == 'start' then
       review.id, review.title, review.base, review.base_ref, review.scope = ev.id, ev.title, ev.base, ev.base_ref, ev.scope or {}
@@ -181,7 +182,9 @@ function M.load(log, viewer)
       end
       ev.seq = seq -- `at` has 1-second resolution; this tells two submits apart
       review.last_submit, review.turn = ev, ev.role == 'human' and 'agent' or 'human'
-      if ev.role == viewer then my_submit = seq end
+      if ev.role == viewer then my_submit, review.reviewed_tree = seq, ev.tree end
+    elseif ev.type == 'viewed' and ev.role == viewer then -- the viewer's own "viewed" marks: path -> fingerprint
+      review.viewed[ev.path] = ev.viewed and ev.hash or nil
     elseif ev.type == 'close' then
       review.closed = true
     end
@@ -326,9 +329,30 @@ function M.find(handle, cwd)
   error(('no review %s here; run `critique ls` in its repo, or use %s@<path>'):format(id, id), 0)
 end
 
+-- The working tree as a git tree, untracked files included, without touching the real index.
+-- shortcut: nothing references the tree, so `git gc` may prune it after ~2 weeks; pin it with a ref if reviews last longer.
+function M.snapshot(root)
+  local tmp = os.tmpname()
+  os.remove(tmp) -- git reads a missing index as empty, but an empty file as corrupt
+  vim.uv.fs_copyfile(M.git(root, 'rev-parse', '--path-format=absolute', '--git-path', 'index'), tmp) -- lets git skip unchanged files
+  local opts = { env = { GIT_INDEX_FILE = tmp } }
+  local ok, tree = pcall(function()
+    run({ 'git', '-C', root, 'add', '-A' }, opts)
+    return vim.trim(run({ 'git', '-C', root, 'write-tree' }, opts))
+  end)
+  os.remove(tmp)
+  if not ok then error(tree, 0) end
+  return tree
+end
+
 -- Diff of the base against the working tree, with GitHub's settings. Untracked files count as added.
-function M.diff(review)
+-- With `since` (a tree from M.snapshot), the changes from that tree to the working tree instead.
+function M.diff(review, since)
   local scope = review.scope or {}
+  if since then
+    return run(vim.list_extend({ 'git', '-C', review.root, unpack(require('critique.diff').GIT_ARGS) },
+      vim.list_extend({ since, M.snapshot(review.root), '--' }, scope)))
+  end
   local out = run(vim.list_extend({ 'git', '-C', review.root, unpack(require('critique.diff').GIT_ARGS) },
     vim.list_extend({ review.base, '--' }, scope)))
   local untracked = run(vim.list_extend({ 'git', '-C', review.root, 'ls-files', '-z', '--others', '--exclude-standard', '--' }, scope))

@@ -44,6 +44,8 @@ double quotes: review text is markdown, and the shell would run anything in back
    - Asked for a change: make it, reply saying what you did, then resolve the thread.
    - A question, or you disagree: reply with your answer or reasoning. Don't resolve it; the user decides.
    - Outdated (its code changed): check whether it still applies, and say so in a reply.
+   - A ```` ```suggestion ```` block is the exact code the user wants in place of the thread's lines (the
+     ones `list` shows). Apply it as written unless you disagree, then reply and resolve as above.
    ```sh
    critique reply -r <id> 3 'Renamed to `minOrder` and added a test in cart_test.go.'
    critique resolve -r <id> 3

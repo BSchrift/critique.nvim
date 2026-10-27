@@ -3,6 +3,15 @@ local diff = require('critique.diff')
 local store = require('critique.store')
 
 local M = {}
+M.config = {
+  auto_suggest = true, -- :w in a review file posts your edits as suggestions instead of saving them
+}
+
+-- require('critique').setup({ auto_suggest = false }), or lazy.nvim's `opts`. Optional: the defaults work as they are.
+function M.setup(opts)
+  M.config = vim.tbl_extend('force', M.config, opts or {})
+end
+
 local ns_diff = vim.api.nvim_create_namespace('critique.diff')
 local ns_threads = vim.api.nvim_create_namespace('critique.threads')
 local MARK = { github = '<!-- ▼ write below · :w saves to your pending review · :q closes ▼ -->',
@@ -10,19 +19,37 @@ local MARK = { github = '<!-- ▼ write below · :w saves to your pending review
   live = '<!-- ▼ write below · :w sends it to the agent · :q closes ▼ -->' }
 local S -- the open review
 
--- shortcut: first 100 threads and 100 comments per thread; paginate if PRs outgrow that.
+-- shortcut: first 100 threads, 100 comments per thread, and 100 files' viewed marks; paginate if PRs outgrow that.
 local PR_QUERY = [[
 query($owner: String!, $name: String!, $number: Int!) {
   repository(owner: $owner, name: $name) {
     pullRequest(number: $number) {
       id title headRefOid baseRefOid
       reviews(states: PENDING, first: 1) { nodes { id } }
+      submitted: reviews(last: 100, states: [APPROVED, CHANGES_REQUESTED, COMMENTED, DISMISSED]) { nodes { viewerDidAuthor commit { oid } } }
+      files(first: 100) { nodes { path viewerViewedState } }
       reviewThreads(first: 100) {
         nodes {
-          id isResolved path line diffSide
+          id isResolved isOutdated path line originalLine diffSide
           comments(first: 100) { nodes { id databaseId body state viewerDidAuthor author { login } } }
         }
       }
+    }
+  }
+}]]
+
+-- shortcut: the last 100 comments, reviews, and checks.
+local OVERVIEW_QUERY = [[
+query($owner: String!, $name: String!, $number: Int!) {
+  repository(owner: $owner, name: $name) {
+    pullRequest(number: $number) {
+      url body state isDraft reviewDecision baseRefName headRefName author { login }
+      commits(last: 1) { nodes { commit { statusCheckRollup { state contexts(last: 100) { nodes {
+        ... on CheckRun { name status conclusion }
+        ... on StatusContext { context state }
+      } } } } } }
+      comments(last: 100) { nodes { author { login } body createdAt } }
+      reviews(last: 100, states: [APPROVED, CHANGES_REQUESTED, COMMENTED, DISMISSED]) { nodes { author { login } body state submittedAt } }
     }
   }
 }]]
@@ -91,41 +118,59 @@ local function thread_line(buf, t, path, side)
   return lnum and math.min(lnum, vim.api.nvim_buf_line_count(buf))
 end
 
+-- "#2 (3) · outdated · alice: Why + 0? · ⏳ claude is on it": the thread at a glance, inline and in :Critique threads.
+local function thread_summary(t)
+  local c = t.comments[1]
+  local count = (t.n and ('#%d '):format(t.n) or '') .. ('(%d)'):format(#t.comments)
+  local state = t.ack and (' · ⏳ ' .. t.ack .. ' is on it') or t.sent and ' · sent' or ''
+  local text = c.body:match('^`+suggestion') and '💡 suggested a change' or first_line(c.body)
+  return ('%s · %s%s: %s%s'):format(count, t.outdated and 'outdated · ' or '', login(c), text, state)
+end
+
+local function is_pending(t)
+  return vim.iter(t.comments):any(function(c) return c.state == 'PENDING' end)
+end
+
 local function render_threads(buf, path, side)
   for _, t in ipairs(S.threads) do
     local lnum = thread_line(buf, t, path, side)
     if lnum then
-      local pending = vim.iter(t.comments):any(function(c) return c.state == 'PENDING' end)
-      local c = t.comments[1]
-      local count = t.n and ('#%d (%d)'):format(t.n, #t.comments) or tostring(#t.comments)
-      local state = t.ack and (' · ⏳ ' .. t.ack .. ' is on it') or t.sent and ' · sent' or ''
-      local text = (' %s %s · %s%s: %s%s'):format(t.isResolved and '✓' or '💬', count, t.outdated and 'outdated · ' or '', login(c),
-        first_line(c.body), state)
       vim.api.nvim_buf_set_extmark(buf, ns_threads, lnum - 1, 0, {
-        virt_text = { { text, t.isResolved and 'CritiqueResolved' or pending and 'CritiquePending' or 'CritiqueThread' } },
+        virt_text = { { (' %s %s'):format(t.isResolved and '✓' or '💬', thread_summary(t)),
+          t.isResolved and 'CritiqueResolved' or is_pending(t) and 'CritiquePending' or 'CritiqueThread' } },
       })
     end
   end
 end
 
+-- The diff drawn on a file. With :Critique since on, the PR side shows only what changed since your last review.
+local function shown(path, side)
+  return (S.since and side == 'RIGHT' and S.since or S).by_path[path]
+end
+
 local function jump(dir)
   local path, side = buf_path(0)
+  local file = shown(path, side)
+  if not file then return end -- :Critique since turned off this file's changes
   local cur, last = vim.fn.line('.'), vim.fn.line('$')
-  local stops = diff.stops(S.by_path[path], side)
+  local stops = diff.stops(file, side)
   for i = dir > 0 and 1 or #stops, dir > 0 and #stops or 1, dir do
     local l = math.max(1, math.min(stops[i], last))
     if (l - cur) * dir > 0 then return vim.api.nvim_win_set_cursor(0, { l, 0 }) end
   end
 end
 
+local intercept_writes -- :w in review files, with auto_suggest (defined with the suggestions below)
+
 local function decorate(buf)
   local path, side = buf_path(buf)
   if not path then return end
   vim.api.nvim_buf_clear_namespace(buf, ns_diff, 0, -1)
   vim.api.nvim_buf_clear_namespace(buf, ns_threads, 0, -1)
-  local file = S.by_path[path]
+  local file = shown(path, side)
   if file and S.overlay then diff.render(buf, file, side, ns_diff) end
   render_threads(buf, path, side)
+  if side == 'RIGHT' and M.config.auto_suggest then intercept_writes(buf) end
   if file then
     vim.keymap.set('n', ']c', function() jump(1) end, { buffer = buf, desc = 'Next PR change' })
     vim.keymap.set('n', '[c', function() jump(-1) end, { buffer = buf, desc = 'Previous PR change' })
@@ -146,7 +191,10 @@ local function read_base(buf)
   if r.code ~= 0 then notify(path .. ' does not exist in the base version', vim.log.levels.WARN) end
   local lines = vim.split(r.stdout or '', '\n')
   if lines[#lines] == '' then lines[#lines] = nil end
-  vim.api.nvim_buf_set_lines(buf, 0, -1, false, lines)
+  -- lockmarks: otherwise the quickfix entries already pointing into this (empty) buffer shift down by its length.
+  vim.g.critique_base = lines
+  vim.cmd(('lockmarks call nvim_buf_set_lines(%d, 0, -1, v:false, g:critique_base)'):format(buf))
+  vim.g.critique_base = nil
   vim.bo[buf].buftype, vim.bo[buf].modifiable, vim.bo[buf].modified = 'nofile', false, false
   vim.bo[buf].filetype = vim.filetype.match({ filename = path, buf = buf }) or ''
   decorate(buf)
@@ -155,11 +203,27 @@ end
 local function fetch_pr(st)
   local pr = gh.gql(st.host, PR_QUERY, { owner = st.owner, name = st.name, number = st.number }).repository.pullRequest
   st.pr_id, st.review_id = pr.id, (pr.reviews.nodes[1] or {}).id
+  st.viewed = {}
+  for _, f in ipairs(pr.files.nodes) do st.viewed[f.path] = ({ VIEWED = 'viewed', DISMISSED = 'changed' })[f.viewerViewedState] end
+  for _, r in ipairs(pr.submitted.nodes) do
+    if r.viewerDidAuthor and r.commit then st.reviewed = r.commit.oid end -- your last review's commit, for :Critique since
+  end
   st.threads = vim.tbl_map(function(t)
-    t.comments = t.comments.nodes
+    t.comments, t.outdated = t.comments.nodes, t.isOutdated
+    t.line = t.line or t.originalLine -- an outdated thread stays where its code was, as in local reviews
     return t
   end, pr.reviewThreads.nodes)
   return pr
+end
+
+-- What a viewed mark remembers in a local review: the file's diff, so a later change shows as "changed since viewed".
+-- shortcut: binary files have no diff lines, so a change to one keeps its mark; hash the file if that matters.
+local function fingerprint(f)
+  local parts = { f.status, f.old_path or '' }
+  for _, h in ipairs(f.hunks) do
+    for _, l in ipairs(h.lines) do parts[#parts + 1] = l.kind .. l.text end
+  end
+  return vim.fn.sha256(table.concat(parts, '\n'))
 end
 
 -- A local review (see store.lua), in the same shape as GitHub's threads so the UI is shared.
@@ -168,6 +232,10 @@ local function load_local(st)
   st.review, st.base, st.title = r, r.base, r.id .. ' · ' .. r.title
   st.files, st.by_path = diff.parse(store.diff(r)), {}
   for _, f in ipairs(st.files) do st.by_path[f.path] = f end
+  st.viewed = {}
+  for path, hash in pairs(r.viewed) do
+    if st.by_path[path] then st.viewed[path] = fingerprint(st.by_path[path]) == hash and 'viewed' or 'changed' end
+  end
   st.threads = vim.tbl_map(function(t)
     return { -- an outdated thread stays where its code was, so you can still read and answer it
       id = t.id, n = t.n, path = t.path, line = t.line or t.orig_line, outdated = t.outdated, isResolved = t.resolved,
@@ -181,46 +249,126 @@ local function load_local(st)
   end, r.threads)
 end
 
-local function set_qf()
-  local items = vim.tbl_map(function(f)
-    local side = f.status == 'D' and 'LEFT' or 'RIGHT'
-    return {
-      filename = side == 'LEFT' and 'critique://base/' .. f.path or S.dir .. '/' .. f.path,
-      lnum = diff.stops(f, side)[1] or 1,
-      text = ('%s  +%d -%d'):format(f.status, f.adds, f.dels),
-    }
-  end, S.files)
-  -- Local reviews can have threads on files outside the diff; list those too.
-  local extra = {}
-  for _, t in ipairs(S.review and S.threads or {}) do
-    if not S.by_path[t.path] then
-      extra[t.path] = extra[t.path] or { filename = S.dir .. '/' .. t.path, lnum = t.line, count = 0 }
-      extra[t.path].count = extra[t.path].count + 1
-    end
-  end
-  for _, e in pairs(extra) do
-    table.insert(items, { filename = e.filename, lnum = e.lnum, text = ('%d thread%s'):format(e.count, e.count == 1 and '' or 's') })
-  end
-  -- Replace our own list in place on refresh, so it never pushes your other quickfix lists off the stack.
-  if not (S.qf_id and vim.fn.setqflist({}, 'r', { id = S.qf_id, title = S.title, items = items }) == 0) then
-    vim.fn.setqflist({}, ' ', { title = S.title, items = items })
-    S.qf_id = vim.fn.getqflist({ id = 0 }).id
-  end
+-- Where the file list takes you in a file: its first change (in a deleted file, on its old version).
+local function first_change(f)
+  local side = f.status == 'D' and 'LEFT' or 'RIGHT'
+  return side, diff.stops(f, side)[1] or 1
+end
+
+local function viewed_count()
+  return #vim.tbl_filter(function(f) return S.viewed[f.path] == 'viewed' end, S.files)
 end
 
 local function plural(n, word)
   return ('%d %s%s'):format(n, word, n == 1 and '' or 's')
 end
 
+-- The open threads, in file order. Once listed, a thread stays (marked resolved when it is) and new ones go at the
+-- end, so the list doesn't shift under ]q while you work through it. :Critique threads starts it afresh.
+local function thread_items()
+  local order, by_id = {}, {}
+  for i, f in ipairs(S.files) do order[f.path] = i end
+  for _, t in ipairs(S.threads) do by_id[t.id] = t end
+  local new = vim.tbl_filter(function(t) return not t.isResolved and not vim.tbl_contains(S.listed, t.id) end, S.threads)
+  table.sort(new, function(a, b)
+    local fa, fb = order[a.path] or math.huge, order[b.path] or math.huge
+    if fa ~= fb then return fa < fb end
+    if a.path ~= b.path then return a.path < b.path end
+    return (a.line or 0) < (b.line or 0)
+  end)
+  for _, t in ipairs(new) do table.insert(S.listed, t.id) end
+  local items, open, waiting = {}, 0, 0
+  for _, id in ipairs(S.listed) do
+    local t = by_id[id]
+    if t then -- gone if all its comments were deleted
+      local needs = not t.isResolved and not t.comments[#t.comments].viewerDidAuthor
+      open, waiting = open + (t.isResolved and 0 or 1), waiting + (needs and 1 or 0)
+      local base = t.diffSide == 'LEFT' or (S.by_path[t.path] or {}).status == 'D'
+      table.insert(items, {
+        filename = (base and 'critique://base/' or S.dir .. '/') .. t.path,
+        lnum = t.line,
+        text = (t.isResolved and '✓ ' or '') .. thread_summary(t)
+          .. (t.isResolved and ' · resolved' or needs and ' · needs your reply' or is_pending(t) and ' · pending' or ''),
+      })
+    end
+  end
+  return items, S.title .. ' · ' .. plural(open, 'open thread')
+    .. (waiting == 0 and '' or waiting == 1 and ' · 1 needs your reply' or (' · %d need your reply'):format(waiting))
+end
+
+-- The review's quickfix list: changed files, or with :Critique threads, open threads. `reset` starts at the top.
+local function set_qf(reset)
+  local items, title
+  if S.list == 'threads' then
+    items, title = thread_items()
+  else
+    items = vim.tbl_map(function(f)
+      local side, lnum = first_change(f)
+      return {
+        filename = side == 'LEFT' and 'critique://base/' .. f.path or S.dir .. '/' .. f.path,
+        lnum = lnum,
+        text = (({ viewed = '✓ ', changed = '● ' })[S.viewed[f.path]] or '') .. ('%s  +%d -%d'):format(f.status, f.adds, f.dels),
+      }
+    end, (S.since or S).files)
+    -- Local reviews can have threads on files outside the diff; list those too.
+    local extra = {}
+    for _, t in ipairs(S.review and S.threads or {}) do
+      if not S.by_path[t.path] then
+        extra[t.path] = extra[t.path] or { filename = S.dir .. '/' .. t.path, lnum = t.line, count = 0 }
+        extra[t.path].count = extra[t.path].count + 1
+      end
+    end
+    for _, e in pairs(extra) do
+      table.insert(items, { filename = e.filename, lnum = e.lnum, text = ('%d thread%s'):format(e.count, e.count == 1 and '' or 's') })
+    end
+    local n = viewed_count()
+    title = S.title .. (S.since and ' · since your last review' or '') .. (n > 0 and (' · %d/%d viewed'):format(n, #S.files) or '')
+  end
+  local idx = not reset and S.qf_id and vim.fn.getqflist({ id = S.qf_id, idx = 0 }).idx or 1
+  local what = { id = S.qf_id, title = title, items = items, idx = math.max(1, math.min(idx, #items)) }
+  -- Replace our own list in place, so it never pushes your other quickfix lists off the stack, and keep your place in it.
+  if not (S.qf_id and vim.fn.setqflist({}, 'r', what) == 0) then
+    what.id = nil
+    vim.fn.setqflist({}, ' ', what)
+    S.qf_id = vim.fn.getqflist({ id = 0 }).id
+  end
+end
+
+-- Changes since your last review: since your last :Critique submit (local), or since the commit your last GitHub review was on.
+local function load_since()
+  local from = S.review and S.review.reviewed_tree or S.reviewed
+  if not from then
+    error(S.review and 'nothing to compare yet: this shows what changed after your next :Critique submit' or "you haven't reviewed this PR yet", 0)
+  end
+  local out
+  if S.review then
+    out = store.diff(S.review, from)
+  else
+    if gh.run({ 'git', '-C', S.git_dir, 'cat-file', '-e', from .. '^{commit}' }).code ~= 0
+      and gh.run({ 'git', '-C', S.git_dir, 'fetch', '--no-tags', 'origin', from }).code ~= 0 then
+      error(("can't fetch %s, the commit of your last review; was it force-pushed away?"):format(from:sub(1, 7)), 0)
+    end
+    out = gh.git(S.git_dir, unpack(vim.list_extend(vim.list_slice(diff.GIT_ARGS), { from, S.head })))
+  end
+  S.since = { files = diff.parse(out), by_path = {} }
+  for _, f in ipairs(S.since.files) do S.since.by_path[f.path] = f end
+end
+
 local function refresh()
   if S.review then
     load_local(S) -- the agent may have changed files too
-    set_qf()
     vim.cmd.checktime()
   else
     fetch_pr(S)
   end
+  if S.since then load_since() end -- your submit, or the agent's edits, change what "since" shows
+  set_qf() -- also for viewed marks: a viewed file may have changed
   redraw()
+end
+
+local function status(r)
+  local turn = r.closed and 'closed' or r.turn == 'human' and 'your turn' or r.turn == 'agent' and "the agent's turn" or 'not submitted yet'
+  return turn .. (r.live and not r.closed and ' · live' or '')
 end
 
 local function writable()
@@ -233,14 +381,9 @@ local function ensure_review()
   return S.review_id
 end
 
-local function save(buf, ctx)
-  local lines, at = vim.api.nvim_buf_get_lines(buf, 0, -1, false), nil
-  for i = #lines, 1, -1 do
-    if lines[i]:find('^<!%-%- ▼ write below') then at = i break end
-  end
-  if not at then error('keep the "<!-- ▼ write below … ▼ -->" line; your comment goes below it', 0) end
-  local body = vim.trim(table.concat(lines, '\n', at + 1))
-  if body == '' then error('comment is empty; nothing saved', 0) end
+-- Saves a comment: an edit of ctx.comment, a reply in ctx.thread, or a new thread at ctx.anchor (on ctx.code).
+-- Returns whether it reopened a resolved thread.
+local function post(ctx, body)
   writable()
   local reopens = S.review and ctx.thread and ctx.thread.isResolved and not ctx.comment -- a new reply on a resolved thread
   if S.review then
@@ -267,6 +410,18 @@ local function save(buf, ctx)
     if not t then error('GitHub rejected the comment', 0) end
     ctx.comment = t.comments.nodes[1]
   end
+  return reopens
+end
+
+local function save(buf, ctx)
+  local lines, at = vim.api.nvim_buf_get_lines(buf, 0, -1, false), nil
+  for i = #lines, 1, -1 do
+    if lines[i]:find('^<!%-%- ▼ write below') then at = i break end
+  end
+  if not at then error('keep the "<!-- ▼ write below … ▼ -->" line; your comment goes below it', 0) end
+  local body = vim.trim(table.concat(lines, '\n', at + 1))
+  if body == '' then error('comment is empty; nothing saved', 0) end
+  local reopens = post(ctx, body)
   if vim.api.nvim_buf_is_valid(buf) then vim.bo[buf].modified = false end
   refresh()
   local agent = S.review and S.review.agent_author or 'the agent'
@@ -303,6 +458,135 @@ local function edit(ctx)
   vim.bo[buf].modified = false
   vim.api.nvim_win_set_cursor(0, { #lines, 0 })
   vim.api.nvim_create_autocmd('BufWriteCmd', { buffer = buf, callback = gh.async(function() save(buf, ctx) end) })
+end
+
+local diff_text = vim.text and vim.text.diff or vim.diff -- vim.diff is deprecated from Neovim 0.12
+
+-- Your unsaved edits in a review file, one per changed block, each as a suggestion on lines of the file on disk.
+-- An insertion goes with the line above it (or below, at the top): GitHub anchors suggestions on existing lines.
+local function edits(buf, path)
+  local old = store.read_lines(S.dir .. '/' .. path) or {}
+  local new = vim.api.nvim_buf_get_lines(buf, 0, -1, false)
+  local file = S.by_path[path]
+  return vim.tbl_map(function(h)
+    local sa, ca, sb, cb = unpack(h)
+    local e = { hunk = h, orig = vim.list_slice(old, sa, sa + ca - 1), lines = vim.list_slice(new, sb, sb + cb - 1), first = sa, show = {} }
+    for _, l in ipairs(e.orig) do table.insert(e.show, '- ' .. l) end
+    for _, l in ipairs(e.lines) do table.insert(e.show, '+ ' .. l) end
+    if ca == 0 then
+      local at = math.max(sa, 1)
+      e.first = at
+      table.insert(e.lines, sa >= 1 and 1 or #e.lines + 1, old[at])
+      table.insert(e.show, sa >= 1 and 1 or #e.show + 1, '  ' .. (old[at] or ''))
+    end
+    e.last = math.max(e.first, sa + ca - 1)
+    e.code = vim.list_slice(old, e.first, e.last)
+    local h1 = file and diff.hunk_of(file, e.first, 'RIGHT')
+    e.ok = #old > 0 and (S.review ~= nil or (h1 ~= nil and h1 == diff.hunk_of(file, e.last, 'RIGHT')))
+    return e
+  end, diff_text(table.concat(old, '\n') .. '\n', table.concat(new, '\n') .. '\n', { result_type = 'indices' }))
+end
+
+local function suggestion_body(lines)
+  local fence = 3 -- longer than any run of backticks in the code, so the code can't end the block
+  for _, l in ipairs(lines) do
+    for run in l:gmatch('`+') do fence = math.max(fence, #run + 1) end
+  end
+  fence = ('`'):rep(fence)
+  return fence .. 'suggestion\n' .. table.concat(vim.list_extend(vim.list_slice(lines), { fence }), '\n')
+end
+
+-- Posts the edits that can be suggestions, like comments, and takes them out of the buffer; the rest stay.
+local function post_suggestions(buf, path, list)
+  local posted, shift = 0, 0
+  for _, e in ipairs(list) do
+    if e.ok then
+      local multi = e.first < e.last
+      post({ code = e.code, anchor = { path = path, side = 'RIGHT', line = e.last, startLine = multi and e.first or nil,
+        startSide = multi and 'RIGHT' or nil } }, suggestion_body(e.lines))
+      posted = posted + 1
+      local _, _, sb, cb = unpack(e.hunk) -- put back the file's lines; `shift` keeps later blocks' line numbers right
+      local from = (cb > 0 and sb - 1 or sb) + shift
+      vim.api.nvim_buf_set_lines(buf, from, from + cb, false, e.orig)
+      shift = shift + #e.orig - cb
+    end
+  end
+  if posted == #list then vim.bo[buf].modified = false end
+  refresh()
+  local what, them, agent = plural(posted, 'suggestion'), posted == 1 and 'it' or 'them', S.review and S.review.agent_author or 'the agent'
+  notify(not S.review and what .. ' saved to your pending review'
+    or S.review.live and ('sent %s · %s starts on %s once you pause'):format(what, agent, them)
+    or ('saved %s; the agent sees %s after :Critique submit'):format(what, them))
+end
+
+local asking, waiting = false, {} -- one window at a time; :wa queues the other files
+
+-- Asks, in a scrollable floating window, whether to post a file's edits as suggestions: y posts them, n cancels.
+local function suggest(buf)
+  if asking then
+    if not vim.tbl_contains(waiting, buf) then table.insert(waiting, buf) end
+    return
+  end
+  local path = buf_path(buf)
+  local list = edits(buf, path)
+  if #list == 0 then
+    vim.bo[buf].modified = false -- edited back to what's on disk
+    return notify('no edits to suggest in ' .. path)
+  end
+  local ok = #vim.tbl_filter(function(e) return e.ok end, list)
+  local lines = {}
+  for _, e in ipairs(list) do
+    if #lines > 0 then table.insert(lines, '') end
+    table.insert(lines, ('%s:%s%s'):format(path, e.first == e.last and e.first or (e.first .. '-' .. e.last),
+      e.ok and '' or " · can't suggest here: not in the PR's diff (stays in the file)"))
+    vim.list_extend(lines, e.show)
+  end
+  local fbuf = vim.api.nvim_create_buf(false, true)
+  vim.api.nvim_buf_set_lines(fbuf, 0, -1, false, lines)
+  vim.bo[fbuf].filetype, vim.bo[fbuf].modifiable, vim.bo[fbuf].bufhidden = 'diff', false, 'wipe'
+  local width = 56
+  for _, l in ipairs(lines) do width = math.max(width, vim.fn.strdisplaywidth(l) + 2) end
+  width = math.min(width, vim.o.columns - 4)
+  local height = math.max(1, math.min(#lines, vim.o.lines - 8))
+  local win = vim.api.nvim_open_win(fbuf, true, {
+    relative = 'editor', width = width, height = height, style = 'minimal', border = 'rounded',
+    row = math.floor((vim.o.lines - height) / 2) - 1, col = math.floor((vim.o.columns - width) / 2),
+    title = ok == 0 and " Can't suggest these " or (' Suggest %s? '):format(ok == 1 and 'this change' or ok .. ' changes'),
+    title_pos = 'center', footer = (ok == 0 and ' n close ' or ' y post as suggestions · n cancel ') .. (height < #lines and '· j/k scroll ' or ''),
+    footer_pos = 'center',
+  })
+  asking = true
+  local function finish(yes)
+    if not asking then return end
+    asking = false
+    pcall(vim.api.nvim_win_close, win, true)
+    if yes and ok > 0 then gh.async(post_suggestions)(buf, path, list) end
+    local nxt = table.remove(waiting, 1)
+    if nxt and vim.api.nvim_buf_is_valid(nxt) then vim.schedule(function() suggest(nxt) end) end
+  end
+  vim.keymap.set('n', 'y', function() finish(true) end, { buffer = fbuf, nowait = true })
+  for _, key in ipairs({ 'n', 'q', '<Esc>' }) do vim.keymap.set('n', key, function() finish(false) end, { buffer = fbuf, nowait = true }) end
+  vim.api.nvim_create_autocmd('BufLeave', { buffer = fbuf, once = true, callback = function() vim.schedule(function() finish(false) end) end })
+end
+
+-- With auto_suggest on, :w in a review file asks to post your edits as suggestions instead of writing the file.
+local function on_write(ev)
+  local buf, target = ev.buf, vim.fn.fnamemodify(ev.file, ':p')
+  if target ~= vim.api.nvim_buf_get_name(buf) or (S.review and vim.v.cmdbang == 1) then
+    -- :w to another file, or :w! in a local review (you editing the agent's files yourself): a normal write, which
+    -- runs your other write autocmds (formatters) since this one is nested.
+    vim.api.nvim_clear_autocmds({ group = 'critique', buffer = buf, event = 'BufWriteCmd' })
+    local ok, err = pcall(vim.cmd, ('write%s%s %s'):format(vim.v.cmdbang == 1 and '!' or '', vim.v.cmdarg, vim.fn.fnameescape(target)))
+    intercept_writes(buf)
+    if not ok then error(err, 0) end
+  elseif vim.fn.state():find('S') then -- a save you made; an auto-save timer (no S) leaves your edits alone
+    vim.schedule(function() suggest(buf) end)
+  end
+end
+
+function intercept_writes(buf)
+  vim.api.nvim_clear_autocmds({ group = 'critique', buffer = buf, event = 'BufWriteCmd' })
+  vim.api.nvim_create_autocmd('BufWriteCmd', { group = 'critique', buffer = buf, nested = true, callback = on_write })
 end
 
 local function here()
@@ -396,7 +680,8 @@ local function watch(log)
     if closed then
       notify(('%s closed the review'):format(who))
     elseif submit then
-      notify(('%s submitted%s · your turn'):format(submit.author, submit.summary and (': ' .. submit.summary) or ''))
+      notify(('%s submitted%s · your turn%s'):format(submit.author, submit.summary and (': ' .. submit.summary) or '',
+        S.review.reviewed_tree and ' · :Critique since shows what changed' or ''))
     elseif #parts > 0 then
       notify(('%s %s'):format(who, table.concat(vim.fn.uniq(parts), ', ')))
     end
@@ -459,8 +744,7 @@ local function open_local(handle)
     if t.n == n then show(t.path, t.diffSide, t.line) end
   end
   local r, open = S.review, #vim.tbl_filter(function(t) return not t.isResolved end, S.threads)
-  local turn = r.closed and 'closed' or r.turn == 'human' and 'your turn' or r.turn == 'agent' and "the agent's turn" or 'not submitted yet'
-  if r.live and not r.closed then turn = turn .. ' · live' end
+  local turn = status(r)
   local last = r.last_submit and r.last_submit.role == 'agent' and r.last_submit.summary
   local msg = ('%s · %s changed · %s · %s%s'):format(S.title, plural(#S.files, 'file'), plural(open, 'open thread'), turn,
     last and (' · ' .. r.last_submit.author .. ': ' .. last) or '')
@@ -504,12 +788,25 @@ function cmds.open(o)
   if watcher then watcher:close() watcher = nil end
   start(st)
   goto_anchor(url)
-  notify(('%s · %s changed'):format(S.title, plural(#S.files, 'file')))
+  notify(('%s · %s changed%s'):format(S.title, plural(#S.files, 'file'),
+    S.reviewed and S.reviewed ~= S.head and ' · new commits since your last review: :Critique since' or ''))
 end
 
-function cmds.files()
-  set_qf()
+-- Shows the review's list of files or threads, even when another quickfix list is the current one.
+local function open_list(kind)
+  S.list = kind
+  if kind == 'threads' then S.listed = {} end
+  set_qf(true)
+  vim.cmd(('silent %dchistory'):format(vim.fn.getqflist({ id = S.qf_id, nr = 0 }).nr))
   vim.cmd('botright copen')
+end
+
+function cmds.files() open_list('files') end
+
+function cmds.threads()
+  open_list('threads')
+  if #vim.fn.getqflist() == 0 then return notify('no open threads') end
+  vim.cmd.cfirst()
 end
 
 function cmds.comment(o)
@@ -585,7 +882,8 @@ function cmds.submit()
     local drafts = #S.review.drafts
     local summary = gh.await(vim.ui.input, { prompt = 'Summary for the agent (optional): ' })
     if not summary then return end
-    store.append(S.log, { type = 'submit', author = S.me, role = 'human', summary = summary ~= '' and summary or nil })
+    local ok, tree = pcall(store.snapshot, S.dir) -- what you reviewed, for :Critique since; never block a submit on it
+    store.append(S.log, { type = 'submit', author = S.me, role = 'human', summary = summary ~= '' and summary or nil, tree = ok and tree or nil })
     refresh()
     if S.review.live then -- the comments already went out as they were saved
       return notify(("told %s: that's all for now"):format(S.review.agent_author or 'the agent'))
@@ -607,6 +905,129 @@ function cmds.submit()
   end
   refresh()
   notify('review submitted')
+end
+
+-- Your edits in this file, as suggestions: the same as :w with auto_suggest on.
+function cmds.suggest()
+  local _, side = here()
+  if side ~= 'RIGHT' then error('suggestions go on the changed version of the file; :Critique after', 0) end
+  suggest(vim.api.nvim_get_current_buf())
+end
+
+-- Toggles between all of the changes and only those since your last review.
+function cmds.since()
+  if S.since then
+    S.since = nil
+  else
+    load_since()
+    if #S.since.files == 0 then
+      S.since = nil
+      return notify('nothing changed since your last review')
+    end
+  end
+  open_list('files')
+  redraw()
+  if S.since then vim.cmd.cfirst() end
+  notify(S.since and ('%s changed since your last review · :Critique since again shows all changes'):format(plural(#S.since.files, 'file'))
+    or 'showing all changes')
+end
+
+-- Marks the file you're in (or, in the file list, the one under the cursor) viewed, then moves on to the next
+-- unviewed one. On a viewed file, unmarks it. GitHub: the same "Viewed" checkbox as on the website.
+function cmds.viewed()
+  writable()
+  local in_list, path = vim.bo.buftype == 'quickfix', nil
+  if in_list then
+    if vim.fn.getqflist({ id = 0 }).id ~= S.qf_id then error("this isn't the review's file list; :Critique files opens it", 0) end
+    local item = vim.fn.getqflist()[vim.fn.line('.')]
+    path = item and buf_path(item.bufnr)
+  else
+    path = here()
+  end
+  local file = S.by_path[path]
+  if not file then error('not a changed file in this review', 0) end
+  local on = S.viewed[path] ~= 'viewed'
+  if S.review then
+    store.append(S.log, { type = 'viewed', path = path, viewed = on, hash = on and fingerprint(file) or nil, author = S.me, role = 'human' })
+  else
+    gh.mutate(S.host, on and 'markFileAsViewed' or 'unmarkFileAsViewed', { pullRequestId = S.pr_id, path = path })
+  end
+  S.viewed[path] = on and 'viewed' or nil
+  set_qf()
+  local n, total = viewed_count(), #S.files
+  if not on then return notify(('not viewed: %s · %d/%d viewed'):format(path, n, total)) end
+  if n == total then return notify(('all %s viewed · :Critique submit'):format(plural(total, 'file'))) end
+  local files = (S.since or S).files
+  local at = vim.iter(ipairs(files)):find(function(_, f) return f.path == path end) or 0
+  for k = 1, #files do
+    local i = (at + k - 1) % #files + 1
+    if S.viewed[files[i].path] ~= 'viewed' then
+      if S.list == 'files' then vim.fn.setqflist({}, 'a', { id = S.qf_id, idx = i }) end -- so :cnext carries on from there
+      if not in_list then
+        show(files[i].path, first_change(files[i]))
+      elseif S.list == 'files' then
+        vim.api.nvim_win_set_cursor(0, { i, 0 })
+      end
+      break
+    end
+  end
+  notify(('%d/%d viewed'):format(n, total))
+end
+
+local FAILED = { failure = true, error = true, timed_out = true, cancelled = true, startup_failure = true, action_required = true }
+
+-- What the review is about and its conversation, in a read-only markdown buffer.
+function cmds.overview()
+  local lines, entries = { '# ' .. S.title }, {}
+  if S.review then
+    local r = S.review
+    table.insert(lines, ('base `%s` (%s) · %s'):format(r.base_ref, r.base:sub(1, 7), status(r)))
+    for _, ev in ipairs(store.events(S.log)) do
+      if ev.type == 'submit' then table.insert(entries, { who = (ev.author or ev.role) .. ' submitted', at = ev.at, body = ev.summary or '' }) end
+    end
+  else
+    local pr = gh.gql(S.host, OVERVIEW_QUERY, { owner = S.owner, name = S.name, number = S.number }).repository.pullRequest
+    local checks = vim.tbl_get(pr, 'commits', 'nodes', 1, 'commit', 'statusCheckRollup')
+    vim.list_extend(lines, {
+      ('%s wants to merge `%s` into `%s` · %s%s'):format(login(pr), pr.headRefName, pr.baseRefName, pr.state:lower(), pr.isDraft and ' · draft' or ''),
+      pr.url, '',
+    })
+    if pr.reviewDecision then table.insert(lines, 'Review: ' .. pr.reviewDecision:lower():gsub('_', ' ')) end
+    local passed, skipped, rest = 0, 0, {} -- like GitHub: count what passed, list the rest
+    for _, c in ipairs(checks and checks.contexts.nodes or {}) do
+      local result = (c.conclusion or c.state or c.status):lower()
+      if result == 'success' then passed = passed + 1
+      elseif result == 'skipped' or result == 'neutral' then skipped = skipped + 1
+      else table.insert(rest, ('- %s %s (%s)'):format(FAILED[result] and '✗' or '•', c.name or c.context, (result:gsub('_', ' ')))) end
+    end
+    table.insert(lines, checks and ('Checks: %s · %d passed%s'):format(checks.state:lower(), passed, skipped > 0 and (', ' .. skipped .. ' skipped') or '')
+      or 'Checks: none')
+    vim.list_extend(lines, rest)
+    vim.list_extend(lines, { '', '## Description', '' })
+    vim.list_extend(lines, pr.body ~= '' and split(pr.body) or { '_No description._' })
+    for _, c in ipairs(pr.comments.nodes) do table.insert(entries, { who = login(c), at = c.createdAt, body = c.body }) end
+    for _, r in ipairs(pr.reviews.nodes) do
+      if r.body ~= '' or r.state ~= 'COMMENTED' then -- a bare COMMENTED review is just its threads, which are on the code
+        local verdict = ({ APPROVED = ' approved', CHANGES_REQUESTED = ' requested changes', DISMISSED = ' (dismissed)' })[r.state] or ''
+        table.insert(entries, { who = login(r) .. verdict, at = r.submittedAt, body = r.body })
+      end
+    end
+    table.sort(entries, function(a, b) return a.at < b.at end)
+  end
+  vim.list_extend(lines, { '', '## Conversation' })
+  if #entries == 0 then vim.list_extend(lines, { '', '_Nothing yet._' }) end
+  for _, e in ipairs(entries) do
+    vim.list_extend(lines, { '', ('### %s · %s'):format(e.who, e.at:sub(1, 10)) })
+    if e.body ~= '' then vim.list_extend(vim.list_extend(lines, { '' }), split(e.body)) end
+  end
+  local old = vim.fn.bufnr('critique://overview')
+  if old ~= -1 then vim.api.nvim_buf_delete(old, { force = true }) end
+  vim.cmd('topleft new')
+  local buf = vim.api.nvim_get_current_buf()
+  vim.api.nvim_buf_set_name(buf, 'critique://overview')
+  vim.api.nvim_buf_set_lines(buf, 0, -1, false, lines)
+  vim.bo[buf].buftype, vim.bo[buf].bufhidden, vim.bo[buf].swapfile, vim.bo[buf].filetype = 'nofile', 'wipe', false, 'markdown'
+  vim.bo[buf].modifiable = false
 end
 
 function cmds.toggle()

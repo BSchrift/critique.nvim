@@ -22,6 +22,8 @@ formatters all keep working. It reviews two kinds of changes:
 8. How it works                                    |critique-internals|
 9. Troubleshooting                                 |critique-troubleshooting|
 10. Local reviews with an agent                    |critique-local|
+11. Suggestions                                    |critique-suggestions|
+12. Configuration                                  |critique-config|
 
 ==============================================================================
 1. Requirements                                        *critique-requirements*
@@ -102,8 +104,47 @@ only to you. Quit any time and run the same command to continue.
     Copy a permalink to the cursor line, or to the lines in [range].
     See |critique-links|.
 
+:Critique suggest                                         *:Critique-suggest*
+    Preview your unsaved edits in this file as suggestions and ask whether
+    to post them: what `:w` does with auto_suggest on (the default). See
+    |critique-suggestions|.
+
+:Critique viewed                                           *:Critique-viewed*
+    Mark the current file viewed, or, in the file list, the file under the
+    cursor, then go to the next file you haven't viewed. On a viewed file,
+    unmark it. The file list shows `✓` on viewed files, `●` on files that
+    changed after you viewed them, and "3/8 viewed" in its title. On GitHub
+    this is the PR's own "Viewed" checkbox, in sync with the website. In a
+    local review it is saved in the review; the agent never sees it.
+
+:Critique since                                             *:Critique-since*
+    Show only what changed since your last review, instead of all of the
+    changes; run it again to show everything. The overlay on changed files,
+    `]c`, and the file list follow it. `:Critique before` still shows the
+    version before the PR. "Your last review" is the commit your last GitHub
+    review was on, or, in a local review, the files as they were at your last
+    `:Critique submit` (saved then as git objects, outside your branch and
+    staging area). While it's on, the view follows new edits by the agent.
+
+:Critique overview                                       *:Critique-overview*
+    What the review is about, in a read-only buffer. GitHub: the PR's
+    branches, review status, checks (failing ones listed), description, and
+    conversation (comments and review summaries). Local review: its base,
+    whose turn it is, and every submit summary from you and the agent.
+
+:Critique threads                                         *:Critique-threads*
+    List the open threads in the quickfix list, in file order, and go to the
+    first. Each entry is tagged `needs your reply` (someone else spoke
+    last), `pending` (your unsubmitted comment), or `outdated` (its code
+    changed; it stays where the code was). The title counts them. Go
+    through them with `]q` / `[q` (or |:cnext|), and `:Critique comment` on
+    a thread's line to open it. A thread you resolve stays in the list,
+    marked resolved, so `]q` carries on where you were; run `:Critique
+    threads` again to drop it. New threads are added at the end.
+
 :Critique files                                             *:Critique-files*
-    Reopen the quickfix list of changed files.
+    Show the quickfix list of changed files again (after `:Critique
+    threads`, or when another quickfix list is in front).
 
 :Critique refresh                                         *:Critique-refresh*
     Reload comments. In a local review, also recompute the diff and reload
@@ -129,6 +170,7 @@ critique sets no other mappings. Some suggestions: >lua
     vim.keymap.set({ 'n', 'x' }, '<leader>cc', ':Critique comment<cr>')
     vim.keymap.set({ 'n', 'x' }, '<leader>cl', ':Critique link<cr>')
     vim.keymap.set('n', '<leader>ct', '<cmd>Critique toggle<cr>')
+    vim.keymap.set('n', '<leader>cv', '<cmd>Critique viewed<cr>')
     vim.keymap.set('n', '<leader>cs', '<cmd>Critique submit<cr>')
 <
 ==============================================================================
@@ -260,7 +302,8 @@ The loop ~
 3. `:Critique submit` publishes your comments to the agent.
 4. The agent, blocked in `critique wait`, reads them, changes code, replies,
    resolves what it fixed, and submits. Neovim reloads the changed files and
-   threads, and says it's your turn.
+   threads, and says it's your turn. |:Critique-since| shows only what it
+   changed this round; |:Critique-overview| has every submit summary.
 5. Repeat until you submit with nothing left open.
 
 Agents learn this from the critique skill. See the README for installing it
@@ -313,5 +356,55 @@ How it works ~
   where the code was, so you can still read and answer it.
 - Several agents: give each one its own git worktree. Agents sharing one
   checkout can limit a review to some paths with `critique start --scope`.
+
+==============================================================================
+11. Suggestions                                         *critique-suggestions*
+
+Edit a file in a review as you normally would, and `:w`. Nothing is written
+to disk. Instead a window shows each changed block as a suggestion: a diff
+of the lines it replaces. It scrolls (`j`, `k`, CTRL-D) when the edit is big.
+
+    y           post them as suggestions, and undo them in the file
+    n           cancel: nothing is posted and your edits stay (also q, <Esc>)
+
+A suggestion is a comment, like |:Critique-comment|. On GitHub it goes into
+your pending review, and the PR's author can apply it with "Commit
+suggestion". In a local review it is a draft until |:Critique-submit|, or
+sent to the agent right away in a live review (|critique-live|); the agent
+applies it unless it disagrees. Each changed block becomes one suggestion on
+the lines it replaces. A deletion is an empty suggestion, and an insertion
+includes the line above it, since suggestions sit on existing lines. To add
+a note, `:Critique comment` on the thread afterwards.
+
+GitHub accepts suggestions only on lines in the PR's diff (the tinted line
+numbers). Edits elsewhere are listed as "can't suggest here" and stay in the
+file.
+
+    :w!         GitHub: the same as `:w`; the PR's checkout is never written.
+                Local review: writes the file, i.e. you change the agent's
+                code yourself.
+    :wa         asks about each edited file in turn.
+    :w {file}   writes a copy, as usual.
+
+Auto-save plugins ~
+critique asks only about saves you make (`:w`, a mapping, `:wq`) and leaves
+your edits alone when a timer saves them, which is how most auto-save
+plugins work. Plugins that save on an event (|InsertLeave|, |TextChanged|)
+look like you to critique, so the window pops up, and some of them write the
+file directly, which critique can't stop. If you use one, turn auto_suggest
+off and use |:Critique-suggest|.
+
+==============================================================================
+12. Configuration                                            *critique-config*
+
+critique works without any setup. To change an option: >lua
+    require('critique').setup({ auto_suggest = false })
+<or with lazy.nvim: >lua
+    { 'BSchrift/critique.nvim', opts = { auto_suggest = false } }
+<
+auto_suggest        (default: true)
+    `:w` in a review file asks to post your edits as suggestions
+    (|critique-suggestions|) instead of saving them. When off, `:w` saves as
+    usual and |:Critique-suggest| asks.
 
  vim:tw=78:ts=8:ft=help:norl:
