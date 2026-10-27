@@ -255,8 +255,10 @@ local function first_change(f)
   return side, diff.stops(f, side)[1] or 1
 end
 
+-- Viewed files among those listed (with :Critique since on, the files changed since your last review), and how many are listed.
 local function viewed_count()
-  return #vim.tbl_filter(function(f) return S.viewed[f.path] == 'viewed' end, S.files)
+  local files = (S.since or S).files
+  return #vim.tbl_filter(function(f) return S.viewed[f.path] == 'viewed' end, files), #files
 end
 
 local function plural(n, word)
@@ -321,8 +323,8 @@ local function set_qf(reset)
     for _, e in pairs(extra) do
       table.insert(items, { filename = e.filename, lnum = e.lnum, text = ('%d thread%s'):format(e.count, e.count == 1 and '' or 's') })
     end
-    local n = viewed_count()
-    title = S.title .. (S.since and ' · since your last review' or '') .. (n > 0 and (' · %d/%d viewed'):format(n, #S.files) or '')
+    local n, total = viewed_count()
+    title = S.title .. (S.since and ' · since your last review' or '') .. (n > 0 and (' · %d/%d viewed'):format(n, total) or '')
   end
   local idx = not reset and S.qf_id and vim.fn.getqflist({ id = S.qf_id, idx = 0 }).idx or 1
   local what = { id = S.qf_id, title = title, items = items, idx = math.max(1, math.min(idx, #items)) }
@@ -774,7 +776,13 @@ function cmds.open(o)
   end
   gh.git(git_dir, 'fetch', '--no-tags', 'origin', pr.baseRefOid, pr.headRefOid)
   if vim.uv.fs_stat(wt) then
-    gh.git(wt, 'checkout', '--detach', pr.headRefOid) -- refuses to clobber local edits
+    if gh.run({ 'git', '-C', wt, 'checkout', '--detach', pr.headRefOid }).code ~= 0 then
+      -- Edits in the checkout are in the way of the new commits (saved with auto_suggest off, by an auto-save
+      -- plugin, or by critique before 0.2). Stash them, so nothing is lost, and try again.
+      st.stashed = vim.split(vim.trim(gh.git(wt, 'diff', 'HEAD', '--name-only')), '\n', { trimempty = true })
+      gh.git(wt, 'stash', 'push', '-m', ('critique: your edits, set aside to reopen PR #%d'):format(st.number))
+      gh.git(wt, 'checkout', '--detach', pr.headRefOid)
+    end
   else
     gh.git(git_dir, 'worktree', 'add', '--detach', wt, pr.headRefOid)
   end
@@ -790,6 +798,11 @@ function cmds.open(o)
   goto_anchor(url)
   notify(('%s · %s changed%s'):format(S.title, plural(#S.files, 'file'),
     S.reviewed and S.reviewed ~= S.head and ' · new commits since your last review: :Critique since' or ''))
+  if st.stashed then
+    local files = #st.stashed <= 3 and table.concat(st.stashed, ', ') or plural(#st.stashed, 'file')
+    notify(("your edits to %s in the PR's checkout were in the way of its new commits, so they're stashed. "
+      .. 'To get them back: git -C %s stash pop'):format(files, vim.fn.shellescape(wt)), vim.log.levels.WARN)
+  end
 end
 
 -- Shows the review's list of files or threads, even when another quickfix list is the current one.
@@ -954,7 +967,7 @@ function cmds.viewed()
   end
   S.viewed[path] = on and 'viewed' or nil
   set_qf()
-  local n, total = viewed_count(), #S.files
+  local n, total = viewed_count()
   if not on then return notify(('not viewed: %s · %d/%d viewed'):format(path, n, total)) end
   if n == total then return notify(('all %s viewed · :Critique submit'):format(plural(total, 'file'))) end
   local files = (S.since or S).files

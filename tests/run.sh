@@ -3,7 +3,7 @@
 # A file only passes if it exits 0 *and* reaches its "N passed, 0 failed" summary (so an early exit can't hide tests).
 cd "$(dirname "$0")/.." || exit 1
 status=0
-for name in ${@:-diff gh store cli local}; do
+for name in ${@:-diff gh store cli local github}; do
   printf '== %s\n' "$name"
   out=$(nvim --headless -l "tests/${name}_test.lua" 2>&1)
   code=$?

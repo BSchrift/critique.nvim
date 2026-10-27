@@ -4,7 +4,7 @@ Code review in Neovim, for **your AI agent's changes** and for **GitHub pull req
 
 ![critique.nvim with Claude Code](demo/agent.gif)
 
-**[▸ Review GitHub pull requests](#review-github-pull-requests)** &nbsp;·&nbsp; **[▸ Review your AI agent's work](#review-your-ai-agents-changes)**
+**[▸ Review GitHub pull requests](#review-github-pull-requests)** &nbsp;·&nbsp; **[▸ Review your AI agent's work](#review-your-ai-agents-changes)** &nbsp;·&nbsp; **[▸ New in 0.2](#new-in-02-built-for-the-second-round)**
 
 - **Review your agent's work like a pull request.** The agent hands you its changes as a review.
   You comment on lines in Neovim, the agent answers in the same threads, fixes things, and hands it
@@ -18,8 +18,20 @@ Code review in Neovim, for **your AI agent's changes** and for **GitHub pull req
 - **Made for the second round.** See only what changed since your last review, tick files off as viewed,
   and step through the open threads.
 
-**New in [0.2.0](CHANGELOG.md):** suggestions by editing, `:Critique threads`, `:Critique viewed`,
-`:Critique since`, and `:Critique overview`.
+## New in 0.2: built for the second round
+
+![Suggestions by editing, changes since your last review, viewed files, and the threads list](demo/features.gif)
+
+<sub>Demo in full quality: [demo/features.mp4](demo/features.mp4)</sub>
+
+- **Suggest by editing.** Change the code and `:w`. After a preview, your edit is a GitHub suggestion the
+  author can commit with one click, or exact code for your agent to apply.
+- **`:Critique since`** shows only what changed since your last review.
+- **`:Critique viewed`** ticks files off as you go, in sync with GitHub's "Viewed" checkbox.
+- **`:Critique threads`** lists every open thread; `]q` / `[q` step through them.
+- **`:Critique overview`** shows the description, CI checks, and the conversation.
+
+Everything new is in the [changelog](CHANGELOG.md).
 
 ## Features
 
@@ -312,8 +324,8 @@ clipboard provider, it goes to the unnamed register only, so `p` pastes it.
 - **GitHub PRs:** each repo is cloned once, blobless, to
   `~/.cache/nvim/critique/<host>/<owner>/<repo>/repo.git`, and each PR gets a git worktree next to
   it at `.../pr-<number>`. Neovim's working directory is set to that worktree, which is why every
-  other tool just works. Reopening a PR fetches new commits and checks out the PR head; if you've
-  edited files in the worktree, the checkout refuses instead of overwriting them. Comments go through
+  other tool just works. Reopening a PR fetches new commits and checks out the PR head; if edits saved in the worktree are in
+  the way, critique stashes them first and tells you how to get them back. Comments go through
   GitHub's GraphQL API via `gh api graphql`.
 - **Local reviews:** a review is an append-only log at `.critique/reviews/<id>.jsonl` in the checkout,
   shared by Neovim and the `critique` command. The diff is the review's base commit (fixed when the
@@ -343,7 +355,7 @@ clipboard provider, it goes to the unnamed register only, so `p` pastes it.
 | `:w` doesn't save the file | By design: `:w` in a review offers your edits as suggestions. In a local review, `:w!` writes the file. Set `auto_suggest = false` to make `:w` save as usual. |
 | The suggestion window pops up while I type | An auto-save plugin is saving on every change. Set `auto_suggest = false` and use `:Critique suggest`. |
 | `:Critique since` says "nothing to compare yet" or "can't fetch" | Local: it compares with your last `:Critique submit`, so submit once first. GitHub: your last review's commit was force-pushed away. |
-| Reopening fails with a checkout error | You changed files in the worktree. Go to `~/.cache/nvim/critique/<host>/<owner>/<repo>/pr-<n>` and `git stash` or `git checkout .`. |
+| critique says your edits were stashed | Edits saved in the PR's checkout were in the way of its new commits. Nothing is lost: run the `git -C … stash pop` from the message to get them back. |
 | LSP errors about missing dependencies | The worktree is a fresh checkout. Install the project's dependencies there as you would for any clone. |
 | A thread says *outdated* | The code it was on has changed. It stays where that code was; reply or resolve it as usual. |
 | `HTTP 401` or `authentication required` for a company host | Run `gh auth login --hostname <your GitHub host>`. |
@@ -378,6 +390,8 @@ tests/run.sh               # every test, offline (unit tests, plus the CLI and N
 tests/run.sh cli local     # just some of them
 vhs demo/demo.tape         # re-record the GitHub demo (needs vhs; edit the PR URL first)
 vhs demo/agent.tape        # re-record the agent demo (needs vhs and Claude Code)
+demo/features-setup.sh     # stage a sandbox PR for the 0.2 demo, then put its URL in demo/features.tape
+vhs demo/features.tape     # re-record the 0.2 demo
 ```
 
 ## License

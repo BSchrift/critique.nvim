@@ -1089,6 +1089,7 @@ H.test(":Critique since shows only what the agent changed after your submit, fol
   goto_line(1)
   vim.cmd('normal ]c')
   H.eq(vim.fn.line('.'), 8, ']c jumps to the new change only')
+  critique('viewed', '1/2 viewed') -- counts the files listed, not all of the review's
   -- More edits while it's on: the view follows them.
   H.write(root, 'cart/tax.go', { 'package cart' })
   agent_submits(root)

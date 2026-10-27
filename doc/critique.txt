@@ -256,8 +256,9 @@ group in your config, e.g. >lua
 - Each repo is cloned once, blobless, to
   `~/.cache/nvim/critique/<host>/<owner>/<repo>/repo.git`, and each PR gets a
   git worktree next to it at `.../pr-<number>`. Reopening fetches new commits
-  and checks out the PR head; if you edited files in the worktree, the
-  checkout refuses instead of overwriting them.
+  and checks out the PR head. If edits saved in the worktree are in the way
+  of new commits, critique stashes them first and tells you how to get them
+  back.
 - The diff is `git diff <merge-base> <head>` with GitHub's settings: 3 lines
   of context, rename detection, Myers algorithm. Your git config can't change
   the hunks.
@@ -288,10 +289,11 @@ group in your config, e.g. >lua
     `:w` to post your edits as suggestions, or undo (`u`, `:e!`), so line
     numbers match the file.
 
-Reopening fails with a checkout error ~
-    You changed files in the worktree. In
-    `~/.cache/nvim/critique/<host>/<owner>/<repo>/pr-<n>`, run `git stash`
-    or `git checkout .`.
+"your edits ... were in the way of its new commits, so they're stashed" ~
+    Edits saved in the PR's checkout (with auto_suggest off, by an auto-save
+    plugin, or by critique before 0.2) touched files the new commits change.
+    Nothing is lost: the `git -C ... stash pop` in the message brings them
+    back.
 
 LSP errors about missing dependencies ~
     The worktree is a fresh checkout. Install the project's dependencies

@@ -4,6 +4,22 @@ All notable changes to critique.nvim. The format follows [Keep a Changelog](http
 and versions follow [Semantic Versioning](https://semver.org/). Releases are git tags (`v0.2.0`); with
 lazy.nvim, `version = '*'` follows them.
 
+## [0.2.2] - 2026-10-27
+
+### Added
+
+- A demo of the 0.2 features in the README (`demo/features.gif`), with the scripts that stage and record
+  it (`demo/features-setup.sh`, `demo/features.tape`).
+
+### Fixed
+
+- Reopening a PR failed with "Your local changes to the following files would be overwritten by
+  checkout" when edits had been saved in its checkout (by `:w` before 0.2, an auto-save plugin, or with
+  `auto_suggest` off) and new commits changed those files. critique now stashes the edits, says so, and
+  tells you how to get them back. Opening GitHub PRs has offline tests now.
+- With `:Critique since` on, the file list's viewed count counted all of the review's files ("2/4
+  viewed" over a list of 3). It counts the files listed now.
+
 ## [0.2.1] - 2026-10-27
 
 ### Documentation
@@ -71,6 +87,7 @@ First release.
 - Live reviews: the agent picks up each comment as you save it.
 - `:help critique`, `:Critique help`, and `critique -h`.
 
+[0.2.2]: https://github.com/BSchrift/critique.nvim/compare/v0.2.1...v0.2.2
 [0.2.1]: https://github.com/BSchrift/critique.nvim/compare/v0.2.0...v0.2.1
 [0.2.0]: https://github.com/BSchrift/critique.nvim/compare/v0.1.0...v0.2.0
 [0.1.0]: https://github.com/BSchrift/critique.nvim/releases/tag/v0.1.0
