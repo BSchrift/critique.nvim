@@ -4,6 +4,16 @@ All notable changes to critique.nvim. The format follows [Keep a Changelog](http
 and versions follow [Semantic Versioning](https://semver.org/). Releases are git tags (`v0.2.0`); with
 lazy.nvim, `version = '*'` follows them.
 
+## [0.2.1] - 2026-10-27
+
+### Documentation
+
+- The README advertises 0.2.0's features at the top and walks through them in the GitHub and agent
+  sections. Both the README and `:help critique` gain their keymaps, how they work, troubleshooting
+  (`:w` not saving, auto-save plugins, `:Critique since` messages), and limits.
+- Fixed: the README and help said outdated GitHub threads are hidden. Since 0.2.0 they show at their
+  old line, marked outdated.
+
 ## [0.2.0] - 2026-10-27
 
 ### Added
@@ -61,5 +71,6 @@ First release.
 - Live reviews: the agent picks up each comment as you save it.
 - `:help critique`, `:Critique help`, and `critique -h`.
 
+[0.2.1]: https://github.com/BSchrift/critique.nvim/compare/v0.2.0...v0.2.1
 [0.2.0]: https://github.com/BSchrift/critique.nvim/compare/v0.1.0...v0.2.0
 [0.1.0]: https://github.com/BSchrift/critique.nvim/releases/tag/v0.1.0

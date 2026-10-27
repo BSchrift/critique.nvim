@@ -50,9 +50,13 @@ Or from inside Neovim: >vim
 <
 Then:
 1. Move between changed files with the quickfix list (`:cnext`, `:cprev`), and
-   between changes in a file with `]c` / `[c`.
-2. On a line, `:Critique comment`, write below the ▼ line, `:w`, `:q`.
-3. When done, `:Critique submit`.
+   between changes in a file with `]c` / `[c`. |:Critique-viewed| ticks a
+   file off and goes to the next.
+2. On a line, `:Critique comment`, write below the ▼ line, `:w`, `:q`. Or
+   edit the code and `:w` to suggest the change (|critique-suggestions|).
+3. |:Critique-threads| lists the open threads; `]q` / `[q` go through them.
+4. When done, `:Critique submit`. Next time, |:Critique-since| shows only
+   what changed since, and |:Critique-overview| the PR's conversation.
 
 Until you submit, comments are a pending review: saved on GitHub, visible
 only to you. Quit any time and run the same command to continue.
@@ -171,6 +175,9 @@ critique sets no other mappings. Some suggestions: >lua
     vim.keymap.set({ 'n', 'x' }, '<leader>cl', ':Critique link<cr>')
     vim.keymap.set('n', '<leader>ct', '<cmd>Critique toggle<cr>')
     vim.keymap.set('n', '<leader>cv', '<cmd>Critique viewed<cr>')
+    vim.keymap.set('n', '<leader>cq', '<cmd>Critique threads<cr>')
+    vim.keymap.set('n', '<leader>cn', '<cmd>Critique since<cr>')
+    vim.keymap.set('n', '<leader>co', '<cmd>Critique overview<cr>')
     vim.keymap.set('n', '<leader>cs', '<cmd>Critique submit<cr>')
 <
 ==============================================================================
@@ -255,9 +262,16 @@ group in your config, e.g. >lua
   of context, rename detection, Myers algorithm. Your git config can't change
   the hunks.
 - Comments go through GitHub's GraphQL API via `gh api graphql`.
-- Loads up to 100 threads per PR and 100 comments per thread. Outdated
-  threads (on code that has since changed) are hidden, as on GitHub's Files
-  tab.
+- Loads up to 100 threads per PR, 100 comments per thread, and viewed marks
+  for 100 files. Outdated threads (on code that has since changed) stay at
+  the line they were on, marked outdated.
+- |:Critique-since| diffs the commit your last review was on against the PR
+  head. In a local review, `:Critique submit` saves a snapshot of the working
+  tree as git objects (through a temporary index; your staging area and
+  branches are untouched), and `:Critique since` diffs it against the files
+  now. `git gc` may delete a snapshot after about two weeks.
+- Suggestions compare the buffer with the file on disk; the file is never
+  written.
 
 ==============================================================================
 9. Troubleshooting                                   *critique-troubleshooting*
@@ -271,7 +285,8 @@ group in your config, e.g. >lua
     `:Critique before`.
 
 "save or undo your edits first" ~
-    Undo (`u`) or reload (`:e!`), so line numbers match the PR.
+    `:w` to post your edits as suggestions, or undo (`u`, `:e!`), so line
+    numbers match the file.
 
 Reopening fails with a checkout error ~
     You changed files in the worktree. In
@@ -284,6 +299,19 @@ LSP errors about missing dependencies ~
 
 Disk space ~
     Delete `~/.cache/nvim/critique`, or one `<host>/<owner>/<repo>` in it.
+
+`:w` doesn't save the file ~
+    By design: it offers your edits as suggestions (|critique-suggestions|).
+    In a local review, `:w!` writes the file. To make `:w` save as usual,
+    turn off auto_suggest (|critique-config|).
+
+The suggestion window pops up while I type ~
+    An auto-save plugin saves on every change. Turn off auto_suggest and use
+    |:Critique-suggest|.
+
+"nothing to compare yet" / "can't fetch" from :Critique since ~
+    Local review: it compares with your last `:Critique submit`; submit once
+    first. GitHub: your last review's commit was force-pushed away.
 
 ==============================================================================
 10. Local reviews with an agent                              *critique-local*

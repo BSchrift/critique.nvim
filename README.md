@@ -13,6 +13,13 @@ Code review in Neovim, for **your AI agent's changes** and for **GitHub pull req
 - **Or go live:** the agent picks up each comment as you save it and starts on it right away.
 - **Review GitHub PRs inside a real checkout.** You get a GitHub-style diff on the real files, while
   your LSP, telescope, and `gd` keep working. Comments sync to GitHub as you write them.
+- **Suggest by editing.** Change the code right in the file and `:w`. After a preview, your edits become
+  suggestions: on GitHub the author commits them with one click, and an agent applies them.
+- **Made for the second round.** See only what changed since your last review, tick files off as viewed,
+  and step through the open threads.
+
+**New in [0.2.0](CHANGELOG.md):** suggestions by editing, `:Critique threads`, `:Critique viewed`,
+`:Critique since`, and `:Critique overview`.
 
 ## Features
 
@@ -77,6 +84,12 @@ Code review in Neovim, for **your AI agent's changes** and for **GitHub pull req
   `:Critique submit` publishes them all at once as Comment, Approve, or Request changes.
 - **Full review workflow.** You can read and reply to other reviewers' threads, resolve
   threads, delete your own comments, comment on several lines at once, and comment on deleted lines.
+- **Suggest by editing.** Edit the code and `:w`: critique previews your edits and posts them as GitHub
+  suggestions, which the author can commit with one click.
+- **Re-review fast.** `:Critique since` shows only the commits since your last review,
+  `:Critique viewed` ticks files off (in sync with GitHub's "Viewed" checkbox), and `:Critique threads`
+  lists the open threads to step through.
+- **PR overview.** `:Critique overview` shows the description, checks, review status, and conversation.
 - **Before/after.** Switch any file to its pre-PR version at the same spot, or hide the diff
   overlay for a plain view.
 - **Share a line.** `:Critique link` copies a permalink to the line you're on.
@@ -95,12 +108,14 @@ new commits. Then:
 
 1. **Find your way around.** The changed files are in the quickfix list (`:cnext` / `:cprev`), and
    `]c` / `[c` jump between changes in a file. You can open any other file with your usual tools.
+   `:Critique viewed` marks a file viewed and takes you to the next one.
 2. **Comment.** Put the cursor on a line and run `:Critique comment`. A markdown buffer opens.
    Write below the `▼` line, then `:w` to save the comment to your pending review and `:q` to close.
    For a multi-line comment, select the lines in visual mode first.
    Or just edit the code and `:w`: critique offers your edits as suggestions.
 3. **Reply or edit.** Run `:Critique comment` on a line that already has a thread. You'll see
-   the whole thread and can reply, or edit your pending comment.
+   the whole thread and can reply, or edit your pending comment. `:Critique threads` lists all the
+   open threads; `]q` / `[q` step through them.
 4. **Look back.** `:Critique before` shows the file as it was before the PR (comment there to
    comment on deleted lines). `:Critique after` comes back.
 5. **Share a line.** `:Critique link` copies a permalink to the cursor line (or a visual
@@ -126,7 +141,8 @@ If you quit halfway, run `critique <url>` again and continue where you left off.
    (`:w!` writes the change yourself). Then `:Critique submit`.
 4. **The agent** is waiting for that submit. It reads your threads, fixes the code, replies, resolves
    what it fixed, and submits again. Neovim refreshes and tells you it's your turn. `:Critique since`
-   shows only what it changed since your submit.
+   shows only what it changed since your submit, `:Critique threads` what's still open, and
+   `:Critique overview` every summary it wrote.
 5. **Repeat** until you submit with nothing left open.
 
 It works the other way round too: ask the agent to review *your* changes with critique, and its
@@ -249,6 +265,9 @@ vim.keymap.set('n', '<leader>ct', '<cmd>Critique toggle<cr>', { desc = 'Critique
 vim.keymap.set({ 'n', 'x' }, '<leader>cl', ':Critique link<cr>', { desc = 'Critique: copy link to line' })
 vim.keymap.set('n', '<leader>cr', '<cmd>Critique resolve<cr>', { desc = 'Critique: resolve thread' })
 vim.keymap.set('n', '<leader>cv', '<cmd>Critique viewed<cr>', { desc = 'Critique: mark file viewed' })
+vim.keymap.set('n', '<leader>cq', '<cmd>Critique threads<cr>', { desc = 'Critique: list open threads' })
+vim.keymap.set('n', '<leader>cn', '<cmd>Critique since<cr>', { desc = 'Critique: only what changed since my review' })
+vim.keymap.set('n', '<leader>co', '<cmd>Critique overview<cr>', { desc = 'Critique: overview' })
 vim.keymap.set('n', '<leader>cs', '<cmd>Critique submit<cr>', { desc = 'Critique: submit review' })
 ```
 
@@ -301,6 +320,15 @@ clipboard provider, it goes to the unnamed register only, so `p` pastes it.
   review starts) against the working tree, including uncommitted and untracked files. Each comment
   stores the code it's on, so threads follow that code as the agent edits; if the code is gone, the
   thread becomes *outdated*. Neovim watches the log and refreshes when the agent submits.
+- **Suggestions:** `:w` compares the buffer with the file on disk. Each changed block becomes a comment
+  holding a ```` ```suggestion ```` block for the lines it replaces, and those edits are taken back out
+  of the buffer. The file is never written.
+- **Since your last review:** on GitHub, the diff from the commit your last review was on to the PR
+  head. In a local review, `:Critique submit` saves a snapshot of the working tree as git objects
+  (through a temporary index, so your staging area and branches are untouched), and `:Critique since`
+  diffs it against the files now.
+- **Viewed files:** on GitHub, the PR's own viewed state. In a local review, an entry in the review's
+  log with a fingerprint of the file's diff, so a later change shows.
 - **Both:** the diff is `git diff` with GitHub's settings (3 context lines, rename detection, Myers
   algorithm), so your git config can't change the hunks. Removed lines are drawn as virtual lines,
   so the buffer is always the real file on disk.
@@ -311,10 +339,13 @@ clipboard provider, it goes to the unnamed register only, so `p` pastes it.
 |---|---|
 | `To get started with GitHub CLI, please run: gh auth login` | Run `gh auth login`. The `critique` launcher offers to do this for you. |
 | `GitHub only accepts comments on lines inside one diff hunk` | Comment on a changed line or within 3 lines of one. For deleted lines, use `:Critique before`. |
-| `save or undo your edits first` | Comments are placed by line number, so the buffer must match the file. Undo (`u`) or `:e!`. |
+| `save or undo your edits first` | Comments are placed by line number, so the buffer must match the file. `:w` to post your edits as suggestions, or undo (`u`, `:e!`). |
+| `:w` doesn't save the file | By design: `:w` in a review offers your edits as suggestions. In a local review, `:w!` writes the file. Set `auto_suggest = false` to make `:w` save as usual. |
+| The suggestion window pops up while I type | An auto-save plugin is saving on every change. Set `auto_suggest = false` and use `:Critique suggest`. |
+| `:Critique since` says "nothing to compare yet" or "can't fetch" | Local: it compares with your last `:Critique submit`, so submit once first. GitHub: your last review's commit was force-pushed away. |
 | Reopening fails with a checkout error | You changed files in the worktree. Go to `~/.cache/nvim/critique/<host>/<owner>/<repo>/pr-<n>` and `git stash` or `git checkout .`. |
 | LSP errors about missing dependencies | The worktree is a fresh checkout. Install the project's dependencies there as you would for any clone. |
-| A thread I expect isn't shown | On GitHub, outdated threads (on code that has since changed) are hidden, as on GitHub's Files tab. Local reviews show them, marked *outdated*. |
+| A thread says *outdated* | The code it was on has changed. It stays where that code was; reply or resolve it as usual. |
 | `HTTP 401` or `authentication required` for a company host | Run `gh auth login --hostname <your GitHub host>`. |
 | `:Critique link` says "no system clipboard" | Neovim found no clipboard tool. The link is in the unnamed register (`p` pastes it). See `:help clipboard`. |
 | `no review <id> here` | Run it from inside the repo, or use the `<id>@<path>` form. `critique ls` (in the repo) lists reviews. |
@@ -332,7 +363,11 @@ To override them, define these highlight groups in your config:
 
 ## Limits
 
-- GitHub: loads up to 100 review threads per PR, and up to 100 comments per thread.
+- GitHub: loads up to 100 review threads per PR, 100 comments per thread, and viewed marks for 100 files.
+  The overview shows the last 100 comments and checks.
+- Local `:Critique since` snapshots are git objects nothing points to, so `git gc` may delete them after
+  about two weeks. Submit again to take a new one.
+- In local reviews, a binary file that changes after you mark it viewed keeps its ✓.
 - One review is open at a time per Neovim instance.
 - Agents sharing one checkout and editing the same file can't have their changes told apart. Use one worktree per agent.
 
