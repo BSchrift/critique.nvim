@@ -10,6 +10,13 @@ end
 
 function M.check()
   health.start('critique.nvim')
+  local version = vim.trim(run({ 'git', '-C', plugin, 'describe', '--tags', '--always' }).stdout)
+  if version ~= '' then health.info('critique.nvim ' .. version) end
+  local critique = require('critique')
+  local on_disk = (vim.uv.fs_stat(plugin .. '/lua/critique/init.lua') or {}).mtime
+  if not critique.loaded or (on_disk and (on_disk.sec ~= critique.loaded.sec or on_disk.nsec ~= critique.loaded.nsec)) then
+    health.warn('critique was updated after this Neovim loaded it, so the old version is still running', 'Restart Neovim.')
+  end
   if vim.fn.has('nvim-0.11') == 1 then
     health.ok('Neovim ' .. tostring(vim.version()))
   else
@@ -23,10 +30,10 @@ function M.check()
   else
     health.ok('git ' .. git)
   end
-  local unknown = vim.tbl_filter(function(k) return require('critique').defaults[k] == nil end, vim.tbl_keys(require('critique').config))
+  local unknown = vim.tbl_filter(function(k) return critique.defaults and critique.defaults[k] == nil end, vim.tbl_keys(critique.config or {}))
   table.sort(unknown)
   for _, k in ipairs(unknown) do
-    health.warn(('unknown option %q in setup()'):format(k), 'Options: ' .. table.concat(vim.tbl_keys(require('critique').defaults), ', '))
+    health.warn(('unknown option %q in setup()'):format(k), 'Options: ' .. table.concat(vim.tbl_keys(critique.defaults), ', '))
   end
 
   health.start('GitHub pull requests')

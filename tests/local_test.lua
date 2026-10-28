@@ -1370,10 +1370,27 @@ H.test('checks Neovim and git, and flags options setup() does not know', functio
     H.has(text, 'OK Neovim ' .. tostring(vim.version()))
     H.has(text, 'OK git ')
     H.has(text, 'unknown option "autosuggest" in setup()')
+    H.has(text, 'critique.nvim v')
     H.lacks(text, 'Failed to run healthcheck')
+    H.lacks(text, 'old version is still running')
     vim.cmd('tabclose')
   end)
   require('critique').config.autosuggest = nil
+  assert(ok, err)
+end)
+H.test('says to restart Neovim when critique was updated after it loaded, instead of failing', function()
+  local critique = require('critique')
+  local loaded, defaults = critique.loaded, critique.defaults
+  critique.loaded, critique.defaults = nil, nil -- a version from before these fields, still in memory
+  local ok, err = pcall(function()
+    vim.cmd('checkhealth critique')
+    local function page() return table.concat(vim.api.nvim_buf_get_lines(0, 0, -1, false), '\n') end
+    H.wait_for(function() return page():find('Reviews with AI agents', 1, true) end, 'the checks')
+    H.has(page(), 'old version is still running')
+    H.lacks(page(), 'Failed to run healthcheck')
+    vim.cmd('tabclose')
+  end)
+  critique.loaded, critique.defaults = loaded, defaults
   assert(ok, err)
 end)
 

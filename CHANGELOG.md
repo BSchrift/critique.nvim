@@ -4,6 +4,18 @@ All notable changes to critique.nvim. The format follows [Keep a Changelog](http
 and versions follow [Semantic Versioning](https://semver.org/). Releases are git tags (`v0.2.0`); with
 lazy.nvim, `version = '*'` follows them.
 
+## [Unreleased]
+
+### Added
+
+- `:checkhealth critique` shows the installed version, and says to restart Neovim when critique was
+  updated after this Neovim loaded it (the old version keeps running until then).
+
+### Fixed
+
+- `:checkhealth critique` failed with "attempt to index field 'defaults'" when an older critique was
+  still loaded in Neovim.
+
 ## [0.7.0] - 2026-10-28
 
 ### Added

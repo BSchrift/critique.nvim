@@ -8,6 +8,8 @@ M.defaults = {
   footer = true, -- comments you post on GitHub end with "Made with critique.nvim"
 }
 M.config = vim.deepcopy(M.defaults)
+-- This file's last change, as of loading it: :checkhealth compares, to catch an update that still needs a restart.
+M.loaded = (vim.uv.fs_stat(debug.getinfo(1, 'S').source:sub(2)) or {}).mtime
 
 -- require('critique').setup({ auto_suggest = false }), or lazy.nvim's `opts`. Optional: the defaults work as they are.
 function M.setup(opts)
