@@ -12,17 +12,19 @@ Set TypingSpeed 35ms
 Set CursorBlink false
 
 Hide
-Type "source demo/env.sh && clear" Enter
+# An empty cache, so the recording shows the first open's download.
+Type "source demo/env.sh && export XDG_CACHE_HOME=$(mktemp -d) && clear" Enter
 Show
 
 # --- open -------------------------------------------------------------------
 Type "critique https://github.com/BSchrift/nvim-reviewer-sandbox/pull/3"
 Sleep 800ms
 Enter
-Sleep 4.5s
+Wait+Screen@60s / changed/
+Sleep 1.5s
 Hide
 Type@5ms ":command! -nargs=1 Cap echohl ModeMsg | echo <q-args> | echohl None" Enter
-Type@5ms ":Cap ▶ The PR is checked out in a worktree and opened in your normal nvim. Changed files are in the quickfix list." Enter
+Type@5ms ":Cap ▶ critique downloaded just the PR's commits and files and opened it in your normal nvim. Changed files are in the quickfix list." Enter
 Show
 Sleep 4s
 

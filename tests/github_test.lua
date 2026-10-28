@@ -1,5 +1,5 @@
--- Integration tests for GitHub PRs in the Neovim UI, offline: GitHub's API is stubbed, and the PR's repo is a
--- local one, cloned where critique keeps its PR checkouts. Run: nvim --headless -l tests/github_test.lua
+-- Integration tests for GitHub PRs in the Neovim UI, offline: GitHub's API is stubbed, and the PRs' repos are
+-- local ones. Run: nvim --headless -l tests/github_test.lua
 local H = dofile(vim.fn.fnamemodify(debug.getinfo(1, 'S').source:sub(2), ':p:h') .. '/helpers.lua')
 H.forbid_gh()
 vim.env.XDG_CACHE_HOME = H.tmp .. '/cache'
@@ -11,27 +11,57 @@ local gh = require('critique.gh')
 local messages = {}
 vim.notify = function(msg, level) table.insert(messages, { msg = msg, level = level }) end
 local function messages_since(n) return vim.tbl_map(function(m) return m.msg end, vim.list_slice(messages, n + 1)) end
+local echoes = {} -- the progress line while a PR opens
+vim.api.nvim_echo = function(chunks) table.insert(echoes, chunks[1][1]) end
 
--- The PR: main is its base, and the pr branch its head.
-local origin = H.repo({ ['a.txt'] = { 'one', 'two', 'three' }, ['b.txt'] = { 'bee' } })
-H.git(origin, 'checkout', '-q', '-b', 'pr')
-H.write(origin, 'a.txt', { 'one', 'TWO', 'three' })
-H.git(origin, 'commit', '-qam', 'first')
+-- A PR's repo: main is its base, and the pr branch its head, which GitHub also has as refs/pull/<n>/head.
+local origins = {}
+local function pr_repo(name, n)
+  local repo = H.repo({ ['a.txt'] = { 'one', 'two', 'three' }, ['b.txt'] = { 'bee' } })
+  for i = 1, 3 do -- some history, which opening a PR shouldn't download
+    H.write(repo, 'history.txt', { tostring(i) })
+    H.git(repo, 'add', '-A')
+    H.git(repo, 'commit', '-qm', 'history ' .. i)
+  end
+  H.git(repo, 'checkout', '-q', '-b', 'pr')
+  H.write(repo, 'a.txt', { 'one', 'TWO', 'three' })
+  H.git(repo, 'commit', '-qam', 'first')
+  H.git(repo, 'update-ref', ('refs/pull/%d/head'):format(n), 'pr')
+  -- Let fetches ask for commits by id and leave out file contents, as GitHub does.
+  H.git(repo, 'config', 'uploadpack.allowfilter', 'true')
+  H.git(repo, 'config', 'uploadpack.allowanysha1inwant', 'true')
+  origins[name] = repo
+  return repo
+end
+-- A new commit on the PR's head.
+local function push(repo, n, lines)
+  H.write(repo, 'a.txt', lines)
+  H.git(repo, 'commit', '-qam', 'more')
+  H.git(repo, 'update-ref', ('refs/pull/%d/head'):format(n), 'pr')
+end
+
+-- PR 7 is in a full clone, as critique made them before 0.4.
+local origin = pr_repo('r', 7)
 local URL = 'https://github.example/o/r/pull/7'
--- critique clones https://github.example/o/r.git once; a clone of the local repo stands in for it.
 local cache = vim.fn.stdpath('cache') .. '/critique/github.example/o/r'
 vim.fn.mkdir(cache, 'p')
 H.git(cache, 'clone', '-q', '--bare', origin, cache .. '/repo.git')
 local checkout = cache .. '/pr-7'
+-- PR 8 has no cache yet: critique downloads it from "GitHub", which is the local repo.
+local origin8 = pr_repo('s', 8)
+H.git(H.tmp, 'config', '--global', 'url.file://' .. origin8 .. '.insteadOf', 'https://github.example/o/s.git')
+gh.merge_base = function(_, _, name, base, head) return H.git(origins[name], 'merge-base', base, head) end
 
 local FOOTER = '\n\n<sub>Made with [critique.nvim](https://github.com/BSchrift/critique.nvim)</sub>'
-local threads, overview = {}, nil -- what "GitHub" returns for the PR's threads, and for :Critique overview
-gh.gql = function(_, query)
+local threads, overview, reviewed = {}, nil, nil -- "GitHub's" PR threads, overview, and the commit of your last review
+gh.gql = function(_, query, vars)
   if query:find('statusCheckRollup') then return { repository = { pullRequest = overview } } end
   assert(query:find('reviewThreads'), 'unexpected query')
+  local repo = origins[vars.name]
   return { repository = { pullRequest = {
-    id = 'PR_7', title = 'Change two', headRefOid = H.git(origin, 'rev-parse', 'pr'), baseRefOid = H.git(origin, 'rev-parse', 'main'),
-    reviews = { nodes = {} }, submitted = { nodes = {} }, files = { nodes = {} }, reviewThreads = { nodes = vim.deepcopy(threads) },
+    id = 'PR_' .. vars.number, title = 'Change two', headRefOid = H.git(repo, 'rev-parse', 'pr'), baseRefOid = H.git(repo, 'rev-parse', 'main'),
+    reviews = { nodes = {} }, files = { nodes = {} }, reviewThreads = { nodes = vim.deepcopy(threads) },
+    submitted = { nodes = reviewed and { { viewerDidAuthor = true, commit = { oid = reviewed } } } or {} },
   } } }
 end
 local sent = {} -- the mutations critique sends: { name, input }
@@ -49,12 +79,12 @@ local function last_sent(name)
   end
 end
 
--- Opens the PR, with `with_threads` as its review threads on "GitHub".
-local function open(with_threads)
+-- Opens the PR (PR 7 unless given), with `with_threads` as its review threads on "GitHub".
+local function open(with_threads, url)
   threads = with_threads or {}
   local before = #messages
   vim.cmd('silent! %bwipeout!')
-  vim.cmd('Critique open ' .. URL)
+  vim.cmd('Critique open ' .. (url or URL))
   H.wait_for(function()
     return vim.iter(messages_since(before)):any(function(m) return m:find(' changed', 1, true) or m:find('error', 1, true) end)
   end, 'the PR to open')
@@ -75,14 +105,59 @@ H.test('reopening keeps edits in the checkout when the new commits leave them al
 end)
 H.test('reopening after new commits stashes edits in their way, instead of failing', function()
   H.write(checkout, 'a.txt', { 'one', 'mine', 'three' })
-  H.write(origin, 'a.txt', { 'one', 'TWO!', 'three' })
-  H.git(origin, 'commit', '-qam', 'second')
+  push(origin, 7, { 'one', 'TWO!', 'three' })
   local msgs = open()
   H.eq(vim.fn.readfile(checkout .. '/a.txt'), { 'one', 'TWO!', 'three' }, 'the checkout is at the new head')
   H.has(msgs[#msgs], "your edits to a.txt in the PR's checkout were in the way of its new commits, so they're stashed")
   H.has(msgs[#msgs], 'stash pop')
   H.has(H.git(checkout, 'stash', 'list'), 'critique: your edits, set aside to reopen PR #7')
   H.has(H.git(checkout, 'stash', 'show', '-p'), '+mine')
+end)
+
+H.section('downloading a PR')
+local URL8, cache8 = 'https://github.example/o/s/pull/8', vim.fn.stdpath('cache') .. '/critique/github.example/o/s'
+H.test('the first open downloads just the commits the review needs, with a progress line', function()
+  echoes = {}
+  local msgs = open(nil, URL8)
+  H.has(msgs[#msgs], '#8 Change two · 1 file changed')
+  H.eq(vim.fn.readfile(cache8 .. '/pr-8/a.txt'), { 'one', 'TWO', 'three' })
+  H.eq(H.git(cache8 .. '/repo.git', 'rev-list', '--count', H.git(origin8, 'rev-parse', 'pr')), '1', 'no history')
+  H.eq(H.git(cache8 .. '/repo.git', 'rev-list', '--count', H.git(origin8, 'merge-base', 'main', 'pr')), '1', 'none for the merge base either')
+  H.eq(vim.fn.systemlist({ 'git', '-C', cache8 .. '/repo.git', 'config', '--get-all', 'credential.helper' }), { '', '!gh auth git-credential' },
+    "gh's credentials, and no others")
+  H.eq(vim.fn.isdirectory(cache8 .. '/repo.git.new'), 0)
+  H.ok(vim.iter(echoes):any(function(e) return e:find('critique: opening o/s#8', 1, true) end), vim.inspect(echoes))
+  H.ok(not vim.iter(echoes):any(function(e) return e:find('FETCH_HEAD', 1, true) end), "only git's progress lines, not its other output")
+  local count = #echoes
+  vim.wait(300)
+  H.eq(#echoes, count, 'the progress line stops once the PR is open')
+end)
+H.test('reopening after new commits downloads just the new head', function()
+  push(origin8, 8, { 'one', 'TWO again', 'three' })
+  open(nil, URL8)
+  H.eq(vim.fn.readfile(cache8 .. '/pr-8/a.txt'), { 'one', 'TWO again', 'three' })
+  H.eq(H.git(cache8 .. '/repo.git', 'rev-list', '--count', H.git(origin8, 'rev-parse', 'pr')), '1', 'still no history')
+end)
+H.test(':Critique since downloads the commit of your last review the same way', function()
+  reviewed = H.git(origin8, 'rev-parse', 'pr~1')
+  local ok, err = pcall(function()
+    open(nil, URL8)
+    local before = #messages
+    vim.cmd('Critique since')
+    H.wait_for(function() return #messages > before end, 'since')
+    H.has(messages[#messages].msg, '1 file changed since your last review')
+  end)
+  reviewed = nil
+  assert(ok, err)
+end)
+H.test('a failed download stops the progress line and says why', function()
+  echoes = {}
+  local before = #messages
+  vim.cmd('Critique open https://github.example/o/s/pull/9') -- no such PR ref
+  H.wait_for(function() return vim.iter(messages_since(before)):any(function(m) return m:find('refs/pull/9', 1, true) end) end, 'the error')
+  local count = #echoes
+  vim.wait(300)
+  H.eq(#echoes, count, 'the progress line stopped')
 end)
 
 H.section('the critique.nvim footer')

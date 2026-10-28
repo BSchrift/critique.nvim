@@ -4,6 +4,25 @@ All notable changes to critique.nvim. The format follows [Keep a Changelog](http
 and versions follow [Semantic Versioning](https://semver.org/). Releases are git tags (`v0.2.0`); with
 lazy.nvim, `version = '*'` follows them.
 
+## [0.4.0] - 2026-10-28
+
+### Added
+
+- A progress line while a PR opens, animated, with git's own progress for each step: "downloading the
+  files · Receiving objects: 74% (2892/3907), 5.89 MiB | 11.76 MiB/s", then "checking out the files".
+- The tagline, "Explore the code while you review it.", under the README's title.
+
+### Changed
+
+- Opening a PR downloads only what the review needs: the PR's head and merge base without the repo's
+  history, and file contents as they're used. On neovim/neovim, a first open fell from about 15 seconds
+  and 70 MB to about 8 seconds and 15 MB, most of it the files themselves. Repos cloned by
+  earlier versions keep working, history included.
+- critique asks GitHub for the PR and fetches its head at the same time, and looks up the merge base
+  while the files download.
+- PR checkouts made from now on have no history, so `git log` and blame there stop at the PR's head.
+- The README's GitHub demo is re-recorded from an empty cache, so it opens with the new download.
+
 ## [0.3.0] - 2026-10-28
 
 ### Added
@@ -98,6 +117,7 @@ First release.
 - Live reviews: the agent picks up each comment as you save it.
 - `:help critique`, `:Critique help`, and `critique -h`.
 
+[0.4.0]: https://github.com/BSchrift/critique.nvim/compare/v0.3.0...v0.4.0
 [0.3.0]: https://github.com/BSchrift/critique.nvim/compare/v0.2.2...v0.3.0
 [0.2.2]: https://github.com/BSchrift/critique.nvim/compare/v0.2.1...v0.2.2
 [0.2.1]: https://github.com/BSchrift/critique.nvim/compare/v0.2.0...v0.2.1

@@ -88,6 +88,27 @@ local function notify(msg, level)
   vim.notify('critique: ' .. msg, level)
 end
 
+local SPINNER = { '⠋', '⠙', '⠹', '⠸', '⠼', '⠴', '⠦', '⠧', '⠇', '⠏' }
+-- An animated status line while a PR opens: the step, and git's own progress for it. It stops by itself when the
+-- command that started it ends, even with an error.
+local progress = {}
+function progress.start(step)
+  local co, timer, frame = coroutine.running(), vim.uv.new_timer(), 0
+  progress.timer, progress.step, progress.detail = timer, step, nil
+  timer:start(0, 100, vim.schedule_wrap(function()
+    if progress.timer ~= timer or coroutine.status(co) == 'dead' then
+      if not timer:is_closing() then timer:close() end
+      return
+    end
+    frame = frame % #SPINNER + 1
+    local text = ('%s critique: %s%s'):format(SPINNER[frame], progress.step, progress.detail and (' · ' .. progress.detail) or '')
+    vim.api.nvim_echo({ { vim.fn.strcharpart(text, 0, math.max(vim.v.echospace, 20) - 1) } }, false, {})
+  end))
+end
+function progress.set(step) progress.step, progress.detail = step, nil end
+function progress.show(detail) progress.detail = detail end
+function progress.stop() progress.timer = nil end
+
 local function login(c)
   return c.author and c.author.login or 'ghost'
 end
@@ -344,6 +365,27 @@ local function set_qf(reset)
   end
 end
 
+-- Fetches commits for a PR: just those commits, without their history, in a repo critique set up that way, and
+-- as a normal fetch in a full clone (made by critique before 0.4). Returns whether it worked, and git's error.
+local function fetch(git_dir, revs, on_progress)
+  local args = { 'fetch', '--progress', '--no-tags' }
+  if vim.uv.fs_stat(git_dir .. '/critique-shallow') then table.insert(args, '--depth=1') end
+  return gh.git_progress(git_dir, on_progress or function() end, vim.list_extend(args, { 'origin', unpack(revs) }))
+end
+
+-- Downloads the file contents of a commit, with progress. Checking it out would download them anyway, but silently.
+-- git skips those it already has.
+local function fetch_files(git_dir, rev, on_progress)
+  local ids = {}
+  for id in gh.git(git_dir, 'ls-tree', '-r', rev):gmatch(' blob (%x+)\t') do ids[#ids + 1] = id end
+  if #ids == 0 then return true end -- with nothing to ask for, git would fetch every branch
+  return gh.git_progress(git_dir, on_progress, { 'fetch', '--progress', '--no-tags', '--no-write-fetch-head', '--stdin', 'origin' }, ids)
+end
+
+local function must(ok, err)
+  if not ok then error(err, 0) end
+end
+
 -- Changes since your last review: since your last :Critique submit (local), or since the commit your last GitHub review was on.
 local function load_since()
   local from = S.review and S.review.reviewed_tree or S.reviewed
@@ -354,9 +396,12 @@ local function load_since()
   if S.review then
     out = store.diff(S.review, from)
   else
-    if gh.run({ 'git', '-C', S.git_dir, 'cat-file', '-e', from .. '^{commit}' }).code ~= 0
-      and gh.run({ 'git', '-C', S.git_dir, 'fetch', '--no-tags', 'origin', from }).code ~= 0 then
-      error(("can't fetch %s, the commit of your last review; was it force-pushed away?"):format(from:sub(1, 7)), 0)
+    S.fetched = S.fetched or {} -- once per commit: refresh() calls this after every comment
+    if not S.fetched[from] then
+      if not fetch(S.git_dir, { from }) then
+        error(("can't fetch %s, the commit of your last review; was it force-pushed away?"):format(from:sub(1, 7)), 0)
+      end
+      S.fetched[from] = true
     end
     out = gh.git(S.git_dir, unpack(vim.list_extend(vim.list_slice(diff.GIT_ARGS), { from, S.head })))
   end
@@ -769,39 +814,63 @@ function cmds.open(o)
     return open_local(url)
   end
   local st = { host = host, owner = owner, name = name, number = tonumber(number), overlay = true, by_path = {} }
-  notify(('fetching %s/%s#%s…'):format(owner, name, number))
-  local pr = fetch_pr(st)
-
+  progress.start(('opening %s/%s#%s'):format(owner, name, number))
   local root = ('%s/critique/%s/%s/%s'):format(vim.fn.stdpath('cache'), host, owner, name)
   local git_dir, wt = root .. '/repo.git', root .. '/pr-' .. number
   if not vim.uv.fs_stat(git_dir) then
-    notify('cloning (first time only)…')
+    -- A repo of just the commits reviews need, without their history, and file contents only once they're used.
+    -- gh supplies the credentials for private repos. Set up under another name, so a half-made one is never used.
+    local new = git_dir .. '.new'
     vim.fn.mkdir(root, 'p')
-    -- Blobless: commits and trees now, file contents on demand. gh supplies credentials for private repos.
-    gh.git(root, 'clone', '--bare', '--filter=blob:none', '--single-branch',
-      '-c', 'credential.helper=', '-c', 'credential.helper=!gh auth git-credential',
-      ('https://%s/%s/%s.git'):format(host, owner, name), git_dir)
-  end
-  gh.git(git_dir, 'fetch', '--no-tags', 'origin', pr.baseRefOid, pr.headRefOid)
-  if vim.uv.fs_stat(wt) then
-    if gh.run({ 'git', '-C', wt, 'checkout', '--detach', pr.headRefOid }).code ~= 0 then
-      -- Edits in the checkout are in the way of the new commits (saved with auto_suggest off, by an auto-save
-      -- plugin, or by critique before 0.2). Stash them, so nothing is lost, and try again.
-      st.stashed = vim.split(vim.trim(gh.git(wt, 'diff', 'HEAD', '--name-only')), '\n', { trimempty = true })
-      gh.git(wt, 'stash', 'push', '-m', ('critique: your edits, set aside to reopen PR #%d'):format(st.number))
-      gh.git(wt, 'checkout', '--detach', pr.headRefOid)
+    vim.fn.delete(new, 'rf')
+    gh.git(root, 'init', '--quiet', '--bare', new)
+    gh.git(new, 'remote', 'add', 'origin', ('https://%s/%s/%s.git'):format(host, owner, name))
+    for _, kv in ipairs({ { 'remote.origin.promisor', 'true' }, { 'remote.origin.partialclonefilter', 'blob:none' },
+      { 'credential.helper', '' }, { 'credential.helper', '!gh auth git-credential' } }) do
+      gh.git(new, 'config', '--add', kv[1], kv[2])
     end
-  else
-    gh.git(git_dir, 'worktree', 'add', '--detach', wt, pr.headRefOid)
+    vim.fn.writefile({}, new .. '/critique-shallow')
+    assert(vim.uv.fs_rename(new, git_dir))
   end
+  -- The PR from GitHub's API, and meanwhile its head commit.
+  local pr = gh.all({
+    function() return fetch_pr(st) end,
+    function() must(fetch(git_dir, { ('refs/pull/%d/head'):format(st.number) }, progress.show)) end,
+  })
+  -- Never ask git whether it has a commit (cat-file -e): in a partial clone, a missing one is then downloaded with
+  -- its whole history. Compare with what was fetched, or just fetch: git skips commits it already has.
+  if vim.trim(gh.git(git_dir, 'rev-parse', 'FETCH_HEAD')) ~= pr.headRefOid then
+    must(fetch(git_dir, { pr.headRefOid }, progress.show)) -- pushed to a moment ago
+  end
+  -- The files, and meanwhile the merge base that GitHub diffs against (git fetches run one at a time: they lock).
+  progress.set('downloading the files')
+  local fresh = not vim.uv.fs_stat(wt)
+  st.base = gh.all({
+    function() return gh.merge_base(host, owner, name, pr.baseRefOid, pr.headRefOid) end,
+    function()
+      if fresh then gh.git(git_dir, 'worktree', 'add', '--quiet', '--no-checkout', '--detach', wt, pr.headRefOid) end
+      must(fetch_files(git_dir, pr.headRefOid, progress.show))
+      progress.set('checking out the files')
+      local ok, err = gh.git_progress(wt, progress.show, { 'checkout', '--progress', '--detach', pr.headRefOid })
+      if not ok and not fresh then
+        -- Edits in the checkout are in the way of the new commits (saved with auto_suggest off, by an auto-save
+        -- plugin, or by critique before 0.2). Stash them, so nothing is lost, and try again.
+        st.stashed = vim.split(vim.trim(gh.git(wt, 'diff', 'HEAD', '--name-only')), '\n', { trimempty = true })
+        gh.git(wt, 'stash', 'push', '-m', ('critique: your edits, set aside to reopen PR #%d'):format(st.number))
+        ok, err = gh.git_progress(wt, progress.show, { 'checkout', '--progress', '--detach', pr.headRefOid })
+      end
+      must(ok, err)
+    end,
+  })
+  must(fetch(git_dir, { st.base }))
 
-  -- GitHub diffs against the merge base.
+  progress.set('computing the diff')
   st.git_dir, st.dir, st.head = git_dir, vim.uv.fs_realpath(wt), pr.headRefOid
-  st.base = vim.trim(gh.git(git_dir, 'merge-base', pr.baseRefOid, pr.headRefOid))
   st.files = diff.parse(gh.git(git_dir, unpack(vim.list_extend(vim.list_slice(diff.GIT_ARGS), { st.base, st.head }))))
   for _, f in ipairs(st.files) do st.by_path[f.path] = f end
   st.title = ('#%d %s'):format(st.number, pr.title)
   if watcher then watcher:close() watcher = nil end
+  progress.stop()
   start(st)
   goto_anchor(url)
   notify(('%s · %s changed%s'):format(S.title, plural(#S.files, 'file'),

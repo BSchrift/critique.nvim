@@ -257,10 +257,14 @@ group in your config, e.g. >lua
 ==============================================================================
 8. How it works                                           *critique-internals*
 
-- Each repo is cloned once, blobless, to
-  `~/.cache/nvim/critique/<host>/<owner>/<repo>/repo.git`, and each PR gets a
-  git worktree next to it at `.../pr-<number>`. Reopening fetches new commits
-  and checks out the PR head. If edits saved in the worktree are in the way
+- Each repo gets a git repo at
+  `~/.cache/nvim/critique/<host>/<owner>/<repo>/repo.git` holding only the
+  commits reviews need, without their history: each PR's head, and its merge
+  base, which GitHub's API reports. File contents download as needed. Each
+  PR gets a git worktree next to it at `.../pr-<number>`. A progress line
+  shows each step while a PR opens. PR checkouts have no history, so `git
+  log` and blame there stop at the PR's head. Reopening fetches the new head
+  and checks it out. If edits saved in the worktree are in the way
   of new commits, critique stashes them first and tells you how to get them
   back.
 - The diff is `git diff <merge-base> <head>` with GitHub's settings: 3 lines

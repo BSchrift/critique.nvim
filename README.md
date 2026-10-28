@@ -1,5 +1,7 @@
 # critique.nvim
 
+**Explore the code while you review it.**
+
 Code review in Neovim, for **your AI agent's changes** and for **GitHub pull requests**.
 
 ![critique.nvim with Claude Code](demo/agent.gif)
@@ -80,7 +82,8 @@ Everything new is in the [changelog](CHANGELOG.md).
 - Read and reply to other reviewers' threads, and resolve them.
 - `:Critique link` copies a permalink to the current line or range.
 - Private repos and GitHub Enterprise work through your existing `gh` login, with no extra setup.
-- Each repo is cloned once (blobless), and each PR gets its own worktree, so reopening is fast.
+- Opening a PR downloads only what the review needs: the PR's commits without the repo's history, and its
+  files. A progress line shows each step as git reports it.
 
 ## Review GitHub pull requests
 
@@ -116,8 +119,9 @@ Or from inside Neovim: `:Critique open https://github.com/owner/repo/pull/123`. 
 including links to a specific file, line, or comment (`…/pull/123/changes#diff-…R31`,
 `…/pull/123#discussion_r…`). critique opens the PR and jumps there.
 
-The first time you open a repo, critique clones it, which takes a few seconds. Later opens only fetch
-new commits. Then:
+critique downloads just the PR's commits and files, not the repo's history, and shows git's progress
+while it does. On neovim/neovim, a first open takes about 8 seconds and 15 MB, where cloning took about
+15 seconds and 70 MB. Later opens only fetch what changed. Then:
 
 1. **Find your way around.** The changed files are in the quickfix list (`:cnext` / `:cprev`), and
    `]c` / `[c` jump between changes in a file. You can open any other file with your usual tools.
@@ -330,9 +334,12 @@ clipboard provider, it goes to the unnamed register only, so `p` pastes it.
 
 ## How it works
 
-- **GitHub PRs:** each repo is cloned once, blobless, to
-  `~/.cache/nvim/critique/<host>/<owner>/<repo>/repo.git`, and each PR gets a git worktree next to
-  it at `.../pr-<number>`. Neovim's working directory is set to that worktree, which is why every
+- **GitHub PRs:** each repo gets a git repo at `~/.cache/nvim/critique/<host>/<owner>/<repo>/repo.git`
+  that holds only the commits reviews need, fetched one at a time without their history (`--depth=1`):
+  each PR's head, and the merge base its diff starts from, which GitHub's API reports. File contents
+  download as they're needed (a partial clone). Each PR gets a git worktree next to it at
+  `.../pr-<number>`. While a PR opens, critique asks GitHub for the PR and fetches its head at the
+  same time, and looks up the merge base while the files download. Neovim's working directory is set to that worktree, which is why every
   other tool just works. Reopening a PR fetches new commits and checks out the PR head; if edits saved in the worktree are in
   the way, critique stashes them first and tells you how to get them back. Comments go through
   GitHub's GraphQL API via `gh api graphql`.
@@ -389,6 +396,8 @@ To override them, define these highlight groups in your config:
 - Local `:Critique since` snapshots are git objects nothing points to, so `git gc` may delete them after
   about two weeks. Submit again to take a new one.
 - In local reviews, a binary file that changes after you mark it viewed keeps its ✓.
+- PR checkouts have no history, so `git log` and blame there stop at the PR's head commit. (Repos that
+  critique cloned before 0.4 keep their full history.)
 - One review is open at a time per Neovim instance.
 - Agents sharing one checkout and editing the same file can't have their changes told apart. Use one worktree per agent.
 
