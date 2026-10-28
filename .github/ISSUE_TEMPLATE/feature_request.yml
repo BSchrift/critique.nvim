@@ -1,0 +1,20 @@
+name: Feature request
+description: An idea for critique
+labels: [enhancement]
+body:
+  - type: textarea
+    id: problem
+    attributes:
+      label: What you're trying to do
+      description: The situation, and what gets in your way today.
+    validations:
+      required: true
+  - type: textarea
+    id: idea
+    attributes:
+      label: How you'd like it to work
+      description: Commands, keys, or what you'd see in Neovim. Rough is fine.
+  - type: textarea
+    id: alternatives
+    attributes:
+      label: What you do instead today

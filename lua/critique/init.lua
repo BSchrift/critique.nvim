@@ -3,10 +3,11 @@ local diff = require('critique.diff')
 local store = require('critique.store')
 
 local M = {}
-M.config = {
+M.defaults = {
   auto_suggest = true, -- :w in a review file posts your edits as suggestions instead of saving them
   footer = true, -- comments you post on GitHub end with "Made with critique.nvim"
 }
+M.config = vim.deepcopy(M.defaults)
 
 -- require('critique').setup({ auto_suggest = false }), or lazy.nvim's `opts`. Optional: the defaults work as they are.
 function M.setup(opts)
@@ -774,6 +775,10 @@ local function open_local(handle)
   if handle ~= '' then
     log, n = store.find(handle, cwd)
   else
+    local cache = (vim.uv.fs_realpath(vim.fn.stdpath('cache')) or vim.fn.stdpath('cache')) .. '/critique/'
+    if vim.startswith(vim.uv.fs_realpath(cwd) or cwd, cache) then
+      error("this folder is critique's checkout of a GitHub PR: :Critique open <PR url> reopens it, and local reviews go in your own repo", 0)
+    end
     local reviews = store.list(cwd)
     if #reviews == 0 then
       local ok, root = pcall(store.git, cwd, 'rev-parse', '--show-toplevel')
@@ -1161,7 +1166,7 @@ function cmds.after() swap('RIGHT') end
 cmds.refresh = refresh
 
 function M.command(o)
-  local sub = o.fargs[1] or 'open' -- bare :Critique opens the local review in this repo
+  local sub = o.fargs[1] or (S and 'comment' or 'help') -- bare :Critique: comment in a review, else the help
   if not cmds[sub] then return notify('unknown subcommand: ' .. sub, vim.log.levels.ERROR) end
   if not S and sub ~= 'open' and sub ~= 'help' then return notify('no review open; run :Critique open <url>', vim.log.levels.ERROR) end
   gh.async(cmds[sub])(o)

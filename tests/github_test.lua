@@ -91,6 +91,14 @@ local function open(with_threads, url)
   return messages_since(before)
 end
 
+H.section(':Critique with no subcommand')
+H.test('with no review open, it opens the help', function()
+  vim.cmd.helptags(H.plugin .. '/doc') -- plugin managers do this on install
+  vim.cmd('Critique')
+  H.eq({ vim.bo.filetype, vim.fn.expand('%:t') }, { 'help', 'critique.txt' })
+  vim.cmd('helpclose')
+end)
+
 H.section('opening a PR')
 H.test('checks out the head and lists the changed files', function()
   local msgs = open()
@@ -112,6 +120,24 @@ H.test('reopening after new commits stashes edits in their way, instead of faili
   H.has(msgs[#msgs], 'stash pop')
   H.has(H.git(checkout, 'stash', 'list'), 'critique: your edits, set aside to reopen PR #7')
   H.has(H.git(checkout, 'stash', 'show', '-p'), '+mine')
+end)
+
+H.test('in an open review, it comments on the cursor line, instead of opening another review', function()
+  open()
+  vim.cmd.edit(checkout .. '/a.txt')
+  vim.api.nvim_win_set_cursor(0, { 2, 0 })
+  vim.cmd('Critique')
+  H.has(vim.api.nvim_buf_get_lines(0, 0, 1, false)[1], 'PR #7 · a.txt:2')
+  vim.cmd('quit!')
+  H.eq(vim.fn.isdirectory(checkout .. '/.critique'), 0, 'no local review started in the checkout')
+end)
+H.test(":Critique open with no argument refuses in critique's checkout of a PR", function()
+  open()
+  local before = #messages
+  vim.cmd('Critique open')
+  H.wait_for(function() return #messages > before end, 'the error')
+  H.has(messages[#messages].msg, "this folder is critique's checkout of a GitHub PR")
+  H.eq(vim.fn.isdirectory(checkout .. '/.critique'), 0)
 end)
 
 H.section('downloading a PR')

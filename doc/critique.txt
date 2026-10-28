@@ -36,8 +36,14 @@ formatters all keep working. It reviews two kinds of changes:
   For GitHub Enterprise Server, log in to your company's host: >sh
     gh auth login --hostname github.yourcompany.com
 <
-critique uses `gh` for everything: fetching the PR, cloning private repos,
-and posting comments. There is no setup() call and nothing to configure.
+critique uses `gh` for everything on GitHub: fetching PRs and their code,
+and posting comments. Nothing needs configuring; |critique-config| has the
+options.
+
+`:checkhealth critique` checks all of these, the `critique` command, and
+the agent skill. >vim
+    :checkhealth critique
+<
 
 ==============================================================================
 2. Quick start                                           *critique-quickstart*
@@ -63,6 +69,9 @@ only to you. Quit any time and run the same command to continue.
 
 ==============================================================================
 3. Commands                                     *:Critique* *critique-commands*
+
+`:Critique` with no subcommand is `:Critique comment` while a review is open
+(on the cursor line, or the lines selected), and this help otherwise.
 
 :Critique open {url}                                         *:Critique-open*
     Fetch the PR, check it out in a worktree, set the working directory
@@ -284,6 +293,8 @@ group in your config, e.g. >lua
 
 ==============================================================================
 9. Troubleshooting                                   *critique-troubleshooting*
+
+Start with `:checkhealth critique`: it checks your setup and says what to fix.
 
 "gh auth login" / HTTP 401 ~
     Run `gh auth login`, or `gh auth login --hostname <host>` for a company

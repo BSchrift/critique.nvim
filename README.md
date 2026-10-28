@@ -2,6 +2,10 @@
 
 **Explore the code while you review it.**
 
+[![tests](https://github.com/BSchrift/critique.nvim/actions/workflows/test.yml/badge.svg)](https://github.com/BSchrift/critique.nvim/actions/workflows/test.yml)
+[![release](https://img.shields.io/github/v/release/BSchrift/critique.nvim)](https://github.com/BSchrift/critique.nvim/releases)
+[![license: MIT](https://img.shields.io/badge/license-MIT-blue)](LICENSE)
+
 Code review in Neovim, for **your AI agent's changes** and for **GitHub pull requests**.
 
 ![critique.nvim with Claude Code](demo/agent.gif)
@@ -250,6 +254,12 @@ Neovim, so an agent can't get stuck in it. The [skill](skills/critique/SKILL.md)
 There's no need to lazy-load it: at startup it only defines the `:Critique` command, which adds
 a few hundredths of a millisecond. Lazy-loading would also hide `:help critique` until the first `:Critique`.
 
+With Neovim 0.12's built-in plugin manager:
+
+```lua
+vim.pack.add({ 'https://github.com/BSchrift/critique.nvim' })
+```
+
 Other plugin managers work the same way: add `BSchrift/critique.nvim`. Nothing needs configuring.
 To follow tagged releases instead of the latest commit, add `version = '*'` (see the
 [changelog](CHANGELOG.md)).
@@ -275,7 +285,11 @@ Agents need it, and you can use it to start reviews from your shell. Link it int
 ln -s ~/.local/share/nvim/lazy/critique.nvim/bin/critique ~/.local/bin/critique
 ```
 
-(Adjust the first path if your plugin manager installs somewhere else.) `critique -h` shows everything it does.
+(Adjust the first path if your plugin manager installs somewhere else: for `vim.pack`, it's
+`~/.local/share/nvim/site/pack/core/opt/critique.nvim/bin/critique`.) `critique -h` shows everything it does.
+
+Then run `:checkhealth critique`. It checks your Neovim, git, and gh login, that the `critique`
+command is the one from this plugin, and whether your agent has the skill.
 
 ### 4. Add keymaps (recommended)
 
@@ -300,6 +314,7 @@ vim.keymap.set('n', '<leader>cs', '<cmd>Critique submit<cr>', { desc = 'Critique
 
 | Command | What it does |
 |---|---|
+| `:Critique` | With a review open: `:Critique comment`. Otherwise: the help |
 | `:Critique open <url or review>` | Open a GitHub PR (jumping to the file, line, or comment a link points at), or a local review by handle. With no argument: the local review in this repo |
 | `:Critique comment` | Comment on the cursor line, or open the thread already there |
 | `:'<,'>Critique comment` | Multi-line comment on a visual selection (always starts a new thread) |
@@ -365,6 +380,7 @@ clipboard provider, it goes to the unnamed register only, so `p` pastes it.
 
 | Problem | Fix |
 |---|---|
+| Something isn't working | Run `:checkhealth critique` first: it checks your setup and says what to fix. |
 | `To get started with GitHub CLI, please run: gh auth login` | Run `gh auth login`. The `critique` launcher offers to do this for you. |
 | `GitHub only accepts comments on lines inside one diff hunk` | Comment on a changed line or within 3 lines of one. For deleted lines, use `:Critique before`. |
 | `save or undo your edits first` | Comments are placed by line number, so the buffer must match the file. `:w` to post your edits as suggestions, or undo (`u`, `:e!`). |
@@ -402,6 +418,9 @@ To override them, define these highlight groups in your config:
 - Agents sharing one checkout and editing the same file can't have their changes told apart. Use one worktree per agent.
 
 ## Development
+
+See [CONTRIBUTING.md](CONTRIBUTING.md). The tests run on every push and pull request, on Linux and
+macOS, with Neovim 0.11, the current release, and nightly.
 
 ```sh
 tests/run.sh               # every test, offline (unit tests, plus the CLI and Neovim UI against temp repos)

@@ -1,0 +1,49 @@
+name: Bug report
+description: Something doesn't work as it should
+labels: [bug]
+body:
+  - type: textarea
+    id: what
+    attributes:
+      label: What happened
+      description: What you did, what you expected, and what happened instead. Paste any error message.
+    validations:
+      required: true
+  - type: textarea
+    id: steps
+    attributes:
+      label: Steps to reproduce
+      placeholder: |
+        1. critique https://github.com/owner/repo/pull/123
+        2. :Critique comment on line 12
+        3. ...
+  - type: dropdown
+    id: where
+    attributes:
+      label: Where
+      options:
+        - A GitHub PR
+        - A local review with an agent
+        - Both
+        - Not sure
+    validations:
+      required: true
+  - type: textarea
+    id: health
+    attributes:
+      label: ":checkhealth critique"
+      description: Paste its output. It has your Neovim, git, and gh versions.
+      render: text
+    validations:
+      required: true
+  - type: input
+    id: version
+    attributes:
+      label: critique version
+      description: The release or commit you're on, e.g. from `:Lazy`.
+      placeholder: v0.4.0
+  - type: input
+    id: os
+    attributes:
+      label: Operating system
+      placeholder: macOS 15, Ubuntu 24.04, ...

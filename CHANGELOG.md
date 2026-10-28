@@ -4,6 +4,30 @@ All notable changes to critique.nvim. The format follows [Keep a Changelog](http
 and versions follow [Semantic Versioning](https://semver.org/). Releases are git tags (`v0.2.0`); with
 lazy.nvim, `version = '*'` follows them.
 
+## [Unreleased]
+
+### Added
+
+- `:checkhealth critique`: checks Neovim, git, the gh login, the `critique` command, and the agent skill,
+  and flags option names that `setup()` doesn't know.
+- Tests run on GitHub Actions for every push and pull request: Linux and macOS, with Neovim 0.11, the
+  current release, and nightly. A badge in the README shows the result.
+- Issue templates (bug reports ask for `:checkhealth critique`), a pull request template, and
+  CONTRIBUTING.md.
+- Install instructions for Neovim 0.12's `vim.pack`.
+- A workflow that publishes each release to LuaRocks, once a `LUAROCKS_API_KEY` secret is set.
+
+### Changed
+
+- `:Critique` with no subcommand comments on the cursor line (or selection) while a review is open, and
+  opens the help otherwise. It used to open the local review in the current folder.
+
+### Fixed
+
+- A bare `:Critique` during a GitHub review replaced it with a local review of the PR's checkout (or of
+  another PR's), after which `:Critique comment` said your file wasn't in the review. `:Critique open`
+  with no argument now refuses inside critique's own PR checkouts.
+
 ## [0.4.0] - 2026-10-28
 
 ### Added
