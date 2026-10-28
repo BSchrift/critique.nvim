@@ -10,7 +10,7 @@ Code review in Neovim, for **your AI agent's changes** and for **GitHub pull req
 
 ![critique.nvim with Claude Code](demo/agent.gif)
 
-**[▸ Review GitHub pull requests](#review-github-pull-requests)** &nbsp;·&nbsp; **[▸ Review your AI agent's work](#review-your-ai-agents-changes)** &nbsp;·&nbsp; **[▸ Built for the second round](#built-for-the-second-round)**
+**[▸ Review GitHub pull requests](#review-github-pull-requests)** &nbsp;·&nbsp; **[▸ Review your AI agent's work](#review-your-ai-agents-changes)**
 
 - **Review your agent's work like a pull request.** The agent hands you its changes as a review.
   You comment on lines in Neovim, the agent answers in the same threads, fixes things, and hands it
@@ -21,21 +21,8 @@ Code review in Neovim, for **your AI agent's changes** and for **GitHub pull req
   your LSP, telescope, and `gd` keep working. Comments sync to GitHub as you write them.
 - **Suggest by editing.** Change the code right in the file and `:w`. After a preview, your edits become
   suggestions: on GitHub the author commits them with one click, and an agent applies them.
-- **Made for the second round.** See only what changed since your last review, tick files off as viewed,
-  and step through the open threads.
-
-## Built for the second round
-
-![Suggestions by editing, changes since your last review, viewed files, and the threads list](demo/features.gif)
-
-<sub>Demo in full quality: [demo/features.mp4](demo/features.mp4)</sub>
-
-- **Suggest by editing.** Change the code and `:w`. After a preview, your edit is a GitHub suggestion the
-  author can commit with one click, or exact code for your agent to apply.
-- **`:Critique since`** shows only what changed since your last review.
-- **`:Critique viewed`** ticks files off as you go, in sync with GitHub's "Viewed" checkbox.
-- **`:Critique threads`** lists every open thread; `]q` / `[q` step through them.
-- **`:Critique overview`** shows the description, CI checks, and the conversation.
+- **Pick up where you left off.** When the author pushes fixes, see only what changed since your last
+  review, tick files off as viewed, and step through the open threads.
 
 ## Features
 
@@ -142,6 +129,12 @@ about 15 seconds and 70 MB. Later opens only fetch what changed. Then:
 6. **Submit.** `:Critique submit` asks for Comment / Approve / Request changes and an optional summary.
 7. **Come back.** When the PR has new commits since your review, critique says so when you open it;
    `:Critique since` shows only those. `:Critique overview` shows the description, checks, and conversation.
+
+![Coming back to a PR: what changed since your review, a suggestion made by editing, files marked viewed, and the open threads](demo/features.gif)
+
+<sub>Coming back to a PR after the author pushed fixes: the overview, only what changed since your
+review, a suggestion made by editing the code, files marked viewed, and the list of open threads.
+Full quality: [demo/features.mp4](demo/features.mp4)</sub>
 
 Until you submit, your comments are a pending review: they're saved on GitHub but only you can see them.
 If you quit halfway, run `critique <url>` again and continue where you left off.
@@ -424,8 +417,8 @@ tests/run.sh               # every test, offline (unit tests, plus the CLI and N
 tests/run.sh cli local     # just some of them
 vhs demo/demo.tape         # re-record the GitHub demo (needs vhs; edit the PR URL first)
 vhs demo/agent.tape        # re-record the agent demo (needs vhs and Claude Code)
-demo/features-setup.sh     # stage a sandbox PR for the second-round demo, then put its URL in demo/features.tape
-vhs demo/features.tape     # re-record the second-round demo
+demo/features-setup.sh     # stage a sandbox PR for the "coming back to a PR" demo, then put its URL in demo/features.tape
+vhs demo/features.tape     # re-record that demo
 ```
 
 ## License
