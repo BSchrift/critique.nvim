@@ -1,4 +1,9 @@
-# critique.nvim
+<h1>
+  <picture>
+    <source media="(prefers-color-scheme: dark)" srcset="assets/logo-dark.svg">
+    <img alt="critique.nvim" src="assets/logo-light.svg" height="60">
+  </picture>
+</h1>
 
 **Explore the code while you review it.**
 

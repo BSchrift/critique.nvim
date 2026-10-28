@@ -4,6 +4,13 @@ All notable changes to critique.nvim. The format follows [Keep a Changelog](http
 and versions follow [Semantic Versioning](https://semver.org/). Releases are git tags (`v0.2.0`); with
 lazy.nvim, `version = '*'` follows them.
 
+## [Unreleased]
+
+### Added
+
+- A logo: at the top of the README (in light and dark versions), in `assets/`, and as the repo's
+  social preview image.
+
 ## [0.5.0] - 2026-10-28
 
 ### Added
