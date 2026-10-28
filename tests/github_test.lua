@@ -52,7 +52,10 @@ local origin8 = pr_repo('s', 8)
 H.git(H.tmp, 'config', '--global', 'url.file://' .. origin8 .. '.insteadOf', 'https://github.example/o/s.git')
 gh.merge_base = function(_, _, name, base, head) return H.git(origins[name], 'merge-base', base, head) end
 
-local FOOTER = '\n\n<sub>Made with [critique.nvim](https://github.com/BSchrift/critique.nvim)</sub>'
+local FOOTER = '\n\n<sub><a href="https://github.com/BSchrift/critique.nvim"><img src="'
+  .. 'https://raw.githubusercontent.com/BSchrift/critique.nvim/main/assets/icon-512.png" height="14" alt=""></a> '
+  .. 'Made with [critique.nvim](https://github.com/BSchrift/critique.nvim)</sub>'
+local TEXT_FOOTER = '\n\n<sub>Made with [critique.nvim](https://github.com/BSchrift/critique.nvim)</sub>' -- before the logo
 local threads, overview, reviewed = {}, nil, nil -- "GitHub's" PR threads, overview, and the commit of your last review
 gh.gql = function(_, query, vars)
   if query:find('statusCheckRollup') then return { repository = { pullRequest = overview } } end
@@ -214,6 +217,14 @@ H.test('a new comment ends with the footer', function()
   vim.cmd('Critique comment')
   write_comment('Why the bang?')
   H.eq(last_sent('addPullRequestReviewThread').body, 'Why the bang?' .. FOOTER)
+end)
+H.test('footers from before the logo are hidden too', function()
+  open({ { id = 'T_2', isResolved = false, isOutdated = false, path = 'a.txt', line = 2, diffSide = 'RIGHT', comments = { nodes = {
+    { id = 'C_9', databaseId = 9, body = 'Older' .. TEXT_FOOTER, state = 'SUBMITTED', viewerDidAuthor = false, author = { login = 'amy' } },
+  } } } })
+  on_line('a.txt', 2)
+  local marks = vim.api.nvim_buf_get_extmarks(0, vim.api.nvim_create_namespace('critique.threads'), 0, -1, { details = true })
+  H.eq(marks[1][4].virt_text[1][1], ' 💬 (1) · amy: Older')
 end)
 H.test("editing your comment shows it without the footer and saves it with exactly one", function()
   open({ { id = 'T_1', isResolved = false, isOutdated = false, path = 'a.txt', line = 2, diffSide = 'RIGHT', comments = { nodes = {

@@ -72,7 +72,7 @@ Code review in Neovim, for **your AI agent's changes** and for **GitHub pull req
 **Reviewing GitHub pull requests**
 - Open any PR link, including links to a file, line, or comment, and critique jumps there.
 - Comments go to a pending GitHub review as you save them. Submit as Comment, Approve, or Request changes.
-  Each one ends with a small "Made with critique.nvim" link (`footer = false` turns it off).
+  Each one ends with a small critique.nvim logo and link (`footer = false` turns it off).
 - Read and reply to other reviewers' threads, and resolve them.
 - `:Critique link` copies a permalink to the current line or range.
 - Private repos and GitHub Enterprise work through your existing `gh` login, with no extra setup.
@@ -265,7 +265,7 @@ Two options, both on by default:
 - `auto_suggest`: `:w` in a review file asks to post your edits as suggestions. Turn it off to have `:w`
   save as usual (`:Critique suggest` still asks), and if you use an auto-save plugin that saves as you
   type; see `:help critique-suggestions`.
-- `footer`: comments and review summaries you post on GitHub end with a small "Made with
+- `footer`: comments and review summaries you post on GitHub end with a small logo and "Made with
   [critique.nvim](https://github.com/BSchrift/critique.nvim)" link. critique hides it again when it
   shows comments, so you never edit it.
 

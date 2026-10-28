@@ -11,6 +11,11 @@ lazy.nvim, `version = '*'` follows them.
 - A logo: at the top of the README (in light and dark versions), in `assets/`, and as the repo's
   social preview image.
 
+### Changed
+
+- The footer on GitHub comments shows the logo, small, before "Made with critique.nvim". Footers from
+  earlier versions are still hidden in Neovim.
+
 ## [0.5.0] - 2026-10-28
 
 ### Added
