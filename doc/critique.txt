@@ -309,8 +309,8 @@ Start with `:checkhealth critique`: it checks your setup and says what to fix.
     numbers match the file.
 
 "your edits ... were in the way of its new commits, so they're stashed" ~
-    Edits saved in the PR's checkout (with auto_suggest off, by an auto-save
-    plugin, or by critique before 0.2) touched files the new commits change.
+    Edits saved in the PR's checkout (with auto_suggest off, or by an
+    auto-save plugin) touched files the new commits change.
     Nothing is lost: the `git -C ... stash pop` in the message brings them
     back.
 

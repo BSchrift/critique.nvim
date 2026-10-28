@@ -10,7 +10,7 @@ Code review in Neovim, for **your AI agent's changes** and for **GitHub pull req
 
 ![critique.nvim with Claude Code](demo/agent.gif)
 
-**[▸ Review GitHub pull requests](#review-github-pull-requests)** &nbsp;·&nbsp; **[▸ Review your AI agent's work](#review-your-ai-agents-changes)** &nbsp;·&nbsp; **[▸ New in 0.2](#new-in-02-built-for-the-second-round)**
+**[▸ Review GitHub pull requests](#review-github-pull-requests)** &nbsp;·&nbsp; **[▸ Review your AI agent's work](#review-your-ai-agents-changes)** &nbsp;·&nbsp; **[▸ Built for the second round](#built-for-the-second-round)**
 
 - **Review your agent's work like a pull request.** The agent hands you its changes as a review.
   You comment on lines in Neovim, the agent answers in the same threads, fixes things, and hands it
@@ -24,7 +24,7 @@ Code review in Neovim, for **your AI agent's changes** and for **GitHub pull req
 - **Made for the second round.** See only what changed since your last review, tick files off as viewed,
   and step through the open threads.
 
-## New in 0.2: built for the second round
+## Built for the second round
 
 ![Suggestions by editing, changes since your last review, viewed files, and the threads list](demo/features.gif)
 
@@ -36,8 +36,6 @@ Code review in Neovim, for **your AI agent's changes** and for **GitHub pull req
 - **`:Critique viewed`** ticks files off as you go, in sync with GitHub's "Viewed" checkbox.
 - **`:Critique threads`** lists every open thread; `]q` / `[q` step through them.
 - **`:Critique overview`** shows the description, CI checks, and the conversation.
-
-Everything new is in the [changelog](CHANGELOG.md).
 
 ## Features
 
@@ -124,8 +122,8 @@ including links to a specific file, line, or comment (`…/pull/123/changes#diff
 `…/pull/123#discussion_r…`). critique opens the PR and jumps there.
 
 critique downloads just the PR's commits and files, not the repo's history, and shows git's progress
-while it does. On neovim/neovim, a first open takes about 8 seconds and 15 MB, where cloning took about
-15 seconds and 70 MB. Later opens only fetch what changed. Then:
+while it does. On neovim/neovim, a first open takes about 8 seconds and 15 MB, where a full clone would take
+about 15 seconds and 70 MB. Later opens only fetch what changed. Then:
 
 1. **Find your way around.** The changed files are in the quickfix list (`:cnext` / `:cprev`), and
    `]c` / `[c` jump between changes in a file. You can open any other file with your usual tools.
@@ -412,8 +410,7 @@ To override them, define these highlight groups in your config:
 - Local `:Critique since` snapshots are git objects nothing points to, so `git gc` may delete them after
   about two weeks. Submit again to take a new one.
 - In local reviews, a binary file that changes after you mark it viewed keeps its ✓.
-- PR checkouts have no history, so `git log` and blame there stop at the PR's head commit. (Repos that
-  critique cloned before 0.4 keep their full history.)
+- PR checkouts have no history, so `git log` and blame there stop at the PR's head commit.
 - One review is open at a time per Neovim instance.
 - Agents sharing one checkout and editing the same file can't have their changes told apart. Use one worktree per agent.
 
@@ -427,8 +424,8 @@ tests/run.sh               # every test, offline (unit tests, plus the CLI and N
 tests/run.sh cli local     # just some of them
 vhs demo/demo.tape         # re-record the GitHub demo (needs vhs; edit the PR URL first)
 vhs demo/agent.tape        # re-record the agent demo (needs vhs and Claude Code)
-demo/features-setup.sh     # stage a sandbox PR for the 0.2 demo, then put its URL in demo/features.tape
-vhs demo/features.tape     # re-record the 0.2 demo
+demo/features-setup.sh     # stage a sandbox PR for the second-round demo, then put its URL in demo/features.tape
+vhs demo/features.tape     # re-record the second-round demo
 ```
 
 ## License

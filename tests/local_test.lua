@@ -1364,7 +1364,9 @@ H.test('checks Neovim and git, and flags options setup() does not know', functio
   require('critique').setup({ autosuggest = false })
   local ok, err = pcall(function()
     vim.cmd('checkhealth critique')
-    local text = table.concat(vim.api.nvim_buf_get_lines(0, 0, -1, false), '\n')
+    local function page() return table.concat(vim.api.nvim_buf_get_lines(0, 0, -1, false), '\n') end
+    H.wait_for(function() return page():find('Reviews with AI agents', 1, true) end, 'the checks (Neovim 0.13 runs them in the background)')
+    local text = page()
     H.has(text, 'OK Neovim ' .. tostring(vim.version()))
     H.has(text, 'OK git ')
     H.has(text, 'unknown option "autosuggest" in setup()')

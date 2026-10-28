@@ -4,7 +4,7 @@ All notable changes to critique.nvim. The format follows [Keep a Changelog](http
 and versions follow [Semantic Versioning](https://semver.org/). Releases are git tags (`v0.2.0`); with
 lazy.nvim, `version = '*'` follows them.
 
-## [Unreleased]
+## [0.5.0] - 2026-10-28
 
 ### Added
 
@@ -21,6 +21,7 @@ lazy.nvim, `version = '*'` follows them.
 
 - `:Critique` with no subcommand comments on the cursor line (or selection) while a review is open, and
   opens the help otherwise. It used to open the local review in the current folder.
+- The README describes the product as it is, without a "New in" section.
 
 ### Fixed
 
@@ -144,6 +145,7 @@ First release.
 - Live reviews: the agent picks up each comment as you save it.
 - `:help critique`, `:Critique help`, and `critique -h`.
 
+[0.5.0]: https://github.com/BSchrift/critique.nvim/compare/v0.4.0...v0.5.0
 [0.4.0]: https://github.com/BSchrift/critique.nvim/compare/v0.3.0...v0.4.0
 [0.3.0]: https://github.com/BSchrift/critique.nvim/compare/v0.2.2...v0.3.0
 [0.2.2]: https://github.com/BSchrift/critique.nvim/compare/v0.2.1...v0.2.2
