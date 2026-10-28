@@ -26,6 +26,12 @@ They run offline in headless Neovim (0.11 or newer) and need only git. GitHub is
 | `lua/critique/health.lua` | `:checkhealth critique` |
 | `skills/critique/SKILL.md` | The skill that teaches agents the review loop |
 
+## Releasing
+
+1. Move "Unreleased" in `CHANGELOG.md` to the new version, with the date.
+2. Set the same version in `.claude-plugin/plugin.json`, so Claude Code sees the update.
+3. Commit, wait for CI to pass, then tag `vX.Y.Z` and create the GitHub release from the changelog section.
+
 ## Style
 
 - Match the code around your change: its naming, its idioms, and its short comments that say why,

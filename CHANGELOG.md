@@ -4,6 +4,24 @@ All notable changes to critique.nvim. The format follows [Keep a Changelog](http
 and versions follow [Semantic Versioning](https://semver.org/). Releases are git tags (`v0.2.0`); with
 lazy.nvim, `version = '*'` follows them.
 
+## [Unreleased]
+
+### Added
+
+- A Claude Code plugin: `/plugin install critique --marketplace BSchrift/critique.nvim` installs the
+  skill in one step, and keeps it up to date. `:checkhealth critique` finds it.
+- A "How it compares" section in the README.
+
+### Fixed
+
+- Security: a review log committed to a repo was treated as yours, so its "human" comments could give an
+  agent instructions, and a thread on `../../somewhere` made critique read files outside the checkout.
+  Committed review logs are now ignored (critique's own are never committed), and threads on paths
+  outside the checkout are dropped.
+- A comment window saved into whichever review was open at `:w`, even another PR. It now refuses, and
+  keeps your text, if its review isn't the open one.
+- A local review write that failed (a full disk, say) was reported as saved. It's an error now.
+
 ## [0.6.0] - 2026-10-28
 
 ### Added

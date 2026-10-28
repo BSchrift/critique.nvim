@@ -1377,4 +1377,29 @@ H.test('checks Neovim and git, and flags options setup() does not know', functio
   assert(ok, err)
 end)
 
+H.section('a comment belongs to its review')
+H.test('a comment saves only into the review it was opened in', function()
+  local _, id_a, log_a = setup()
+  open(id_a)
+  goto_line(4)
+  critique('comment')
+  local cwin, cbuf = vim.api.nvim_get_current_win(), vim.api.nvim_get_current_buf()
+  local lines = vim.api.nvim_buf_get_lines(cbuf, 0, -1, false)
+  vim.api.nvim_buf_set_lines(cbuf, #lines - 1, -1, false, { 'For review A' })
+  -- Meanwhile, from the other window, another review is opened.
+  vim.cmd.wincmd('p')
+  local root_b = H.repo({ ['b.txt'] = { 'bee' } })
+  H.write(root_b, 'b.txt', { 'bee!' })
+  local id_b = H.start(root_b, { '--title', 'Other', '--base', 'HEAD', '--as', 'claude' })
+  open(id_b)
+  vim.fn.win_gotoid(cwin)
+  local before = #messages
+  vim.cmd('write')
+  H.wait_for(function() return #messages > before end, 'the refusal')
+  H.has(last_msg(), 'this comment is for ' .. id_a .. ' · Cart fix, which is no longer open')
+  H.eq({ #store.load(log_a, 'human').threads, #store.load(store.find(id_b, root_b), 'human').threads, vim.bo.modified },
+    { 0, 0, true }, 'saved nowhere, and still in the buffer')
+  vim.cmd('quit!')
+end)
+
 H.done()

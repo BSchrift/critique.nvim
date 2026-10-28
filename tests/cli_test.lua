@@ -1120,4 +1120,16 @@ H.test('a draft reply that is deleted before the submit reopens nothing, in eith
   H.eq(store.load(log, 'human').threads[1].resolved, true)
 end)
 
+H.section('trust and safety')
+H.test("an agent never sees a review that was committed to the repo", function()
+  local root = H.repo({ ['f.txt'] = { 'one' } })
+  local id = H.start(root, { '--title', 'planted' })
+  H.git(root, 'add', '-f', '.critique/reviews/' .. id .. '.jsonl')
+  H.git(root, 'commit', '-qm', 'a review someone else wrote')
+  H.lacks(H.run(root, { 'ls' }), id)
+  local r = H.cli(root, { 'list', '-r', id })
+  H.eq(r.code, 1)
+  H.has(r.err .. r.out, 'committed to this repo')
+end)
+
 H.done()

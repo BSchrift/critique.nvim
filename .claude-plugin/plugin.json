@@ -1,0 +1,18 @@
+{
+  "name": "critique",
+  "version": "0.7.0",
+  "description": "The critique skill: hand your changes to the user for review in critique.nvim (Neovim), answer and fix their comment threads, and review their changes, through the critique command.",
+  "author": {
+    "name": "BSchrift",
+    "url": "https://github.com/BSchrift"
+  },
+  "homepage": "https://github.com/BSchrift/critique.nvim",
+  "repository": "https://github.com/BSchrift/critique.nvim",
+  "license": "MIT",
+  "keywords": [
+    "code-review",
+    "neovim",
+    "review",
+    "pull-request"
+  ]
+}

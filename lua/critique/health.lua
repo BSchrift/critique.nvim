@@ -56,10 +56,11 @@ function M.check()
   end
   local skills = vim.tbl_filter(function(dir) return vim.uv.fs_stat(vim.fn.expand(dir) .. '/SKILL.md') ~= nil end,
     { '~/.claude/skills/critique', '~/.agents/skills/critique' })
+  if vim.fn.glob('~/.claude/plugins/**/skills/critique/SKILL.md') ~= '' then table.insert(skills, 'the Claude Code plugin') end
   if #skills > 0 then
     health.ok('agent skill: ' .. table.concat(skills, ', '))
   else
-    health.info('no agent skill in ~/.claude/skills or ~/.agents/skills (or it is set up per repo). See the README to give your agent the critique skill.')
+    health.info('no agent skill found (it may be set up per repo). In Claude Code: /plugin install critique --marketplace BSchrift/critique.nvim; for other agents, see the README.')
   end
 end
 

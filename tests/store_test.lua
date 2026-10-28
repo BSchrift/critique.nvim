@@ -631,4 +631,30 @@ H.test("a viewed mark doesn't delay a live agent (it isn't a comment)", function
   H.eq(store.load(log, 'agent').human_last_at, before)
 end)
 
+H.section('trust and safety')
+H.test('a review committed to the repo is not listed, and opening it by id is refused', function()
+  local root = H.repo({ ['f.txt'] = { 'one' } })
+  local id = store.load(store.start(root, { title = 'planted' }), 'human').id
+  H.git(root, 'add', '-f', '.critique/reviews/' .. id .. '.jsonl')
+  H.git(root, 'commit', '-qm', 'a review someone else wrote')
+  H.eq(#store.list(root), 0)
+  H.has(H.errors(store.find, id, root), 'committed to this repo')
+end)
+H.test('threads on files outside the checkout are dropped', function()
+  local _, log = new_review()
+  for _, path in ipairs({ '../../etc/hosts', '/etc/hosts', 'a/../../b', 'f.txt', 'two..dots.txt' }) do
+    comment(log, { path = path, role = 'human', author = 'x' })
+  end
+  H.eq(vim.tbl_map(function(t) return t.path end, store.load(log, 'human').threads), { 'f.txt', 'two..dots.txt' })
+end)
+H.test('a write that fails is an error, not a silent loss', function()
+  local _, log = new_review()
+  local write = vim.uv.fs_write
+  vim.uv.fs_write = function() return nil, 'ENOSPC: no space left on device' end
+  local err = H.errors(store.append, log, { type = 'comment' })
+  vim.uv.fs_write = write
+  H.has(err, 'could not save to')
+  H.has(err, 'ENOSPC')
+end)
+
 H.done()

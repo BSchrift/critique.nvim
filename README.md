@@ -219,7 +219,7 @@ through that command. Then give your agent the critique skill, which teaches it 
 
 | Agent | Install the skill |
 |---|---|
-| **Claude Code** | `mkdir -p ~/.claude/skills && ln -s ~/.local/share/nvim/lazy/critique.nvim/skills/critique ~/.claude/skills/critique` |
+| **Claude Code** | In Claude Code, run `/plugin install critique --marketplace BSchrift/critique.nvim` (Claude Code 2.1.275 or later). Or link the skill: `mkdir -p ~/.claude/skills && ln -s ~/.local/share/nvim/lazy/critique.nvim/skills/critique ~/.claude/skills/critique` |
 | **Codex, Cursor**, and other agents that read `~/.agents/skills` | `mkdir -p ~/.agents/skills && ln -s ~/.local/share/nvim/lazy/critique.nvim/skills/critique ~/.agents/skills/critique` |
 | **Any other agent** (Gemini CLI, Aider, …) | Paste [skills/critique/SKILL.md](skills/critique/SKILL.md), without the `---` header, into its instructions file (`AGENTS.md`, `GEMINI.md`, …) |
 
@@ -227,7 +227,8 @@ When the agent commits work you reviewed in critique, the skill has it end the c
 `Developed-with: critique (https://github.com/BSchrift/critique.nvim)` trailer. To leave it out, tell
 your agent not to add trailers (in `CLAUDE.md`, `AGENTS.md`, or the like).
 
-Linking instead of copying keeps the skill up to date when the plugin updates. To set it up for one
+The Claude Code plugin updates itself, and linking instead of copying keeps a linked skill up to date
+when the Neovim plugin updates. To set it up for one
 repo only, link it into that repo's `.claude/skills/` or `.agents/skills/` instead. If your plugin
 manager isn't lazy.nvim, adjust the plugin path as in step 3.
 
@@ -430,6 +431,20 @@ To override them, define these highlight groups in your config:
 `CritiqueAdd`, `CritiqueAddWord`, `CritiqueAddSign`, `CritiqueDelete`, `CritiqueDeleteWord`,
 `CritiqueDeleteSign`, `CritiqueHunk` (tinted line numbers), `CritiqueThread`, `CritiquePending`,
 `CritiqueResolved`
+
+## How it compares
+
+Other tools review code from Neovim or the terminal, and each makes a different trade:
+
+| | critique.nvim | [octo.nvim](https://github.com/pwntester/octo.nvim) | [diffview.nvim](https://github.com/sindrets/diffview.nvim) | [tuicr](https://github.com/agavra/tuicr) |
+|---|---|---|---|---|
+| Where you review | The PR's real files, in your Neovim, with your LSP | Octo's own PR buffers in Neovim | Neovim | Its own terminal app |
+| Comments on GitHub PRs | Yes, synced as you save | Yes | No | Yes, exported as a review |
+| Reviewing an AI agent's changes | A loop: the agent answers and fixes in the same threads | No | No | You copy or pipe the review to the agent |
+| Also does | Suggestions by editing, local reviews | All of GitHub: issues, discussions, labels, reactions | Diffs and file history for any git revision | GitLab, Gitea, Bitbucket, and more |
+
+If you mostly manage GitHub from Neovim, octo.nvim covers far more of it. critique is for the review
+itself: reading and commenting on code you can navigate like any other.
 
 ## Limits
 

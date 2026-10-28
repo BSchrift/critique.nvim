@@ -45,9 +45,11 @@ end
 
 function M.append(log, ev)
   ev.at = os.date('!%Y-%m-%dT%H:%M:%SZ')
+  local line = vim.json.encode(ev) .. '\n'
   local fd = assert(vim.uv.fs_open(log, 'a', 420))
-  vim.uv.fs_write(fd, vim.json.encode(ev) .. '\n')
+  local written, err = vim.uv.fs_write(fd, line)
   vim.uv.fs_close(fd)
+  if written ~= #line then error(('could not save to %s: %s'):format(log, err or 'disk full?'), 0) end
   return ev
 end
 
@@ -155,7 +157,9 @@ function M.load(log, viewer)
       if threads[ev.thread] and ev.role == 'human' and threads[ev.thread].resolved then
         if c.pending then c.reopens = true else threads[ev.thread].resolved = false end
       end
-      if ev.thread == ev.id then
+      -- A thread must be on a file in the checkout: not an absolute path, and not one that climbs out with "..".
+      local inside = type(ev.path) == 'string' and not ev.path:match('^/') and not ('/' .. ev.path .. '/'):find('/%.%./')
+      if ev.thread == ev.id and inside then
         threads[ev.id] = {
           id = ev.id, n = #review.threads + 1, path = ev.path, side = ev.side, line = ev.line,
           start_line = ev.start_line, orig_line = ev.line, code = ev.code, resolved = false, comments = {},
@@ -294,11 +298,17 @@ local function worktrees(cwd)
 end
 
 -- Open reviews in this repo (all of its worktrees), or only in the checkout at `root` if given.
+-- A review log that git tracks came with the repo: whoever committed it wrote its "human" comments, which could
+-- tell an agent to do anything. critique's own logs are never committed (.critique/.gitignore ignores them).
+local function committed(root, id)
+  return vim.system({ 'git', '-C', root, 'ls-files', '--error-unmatch', '--', '.critique/reviews/' .. id .. '.jsonl' }):wait().code == 0
+end
+
 function M.list(cwd, root)
   local found = {}
   for _, wt in ipairs(root and { root } or worktrees(cwd)) do
     for name, kind in vim.uv.fs_stat(reviews_dir(wt)) and vim.fs.dir(reviews_dir(wt)) or function() end do
-      if kind == 'file' and name:match('%.jsonl$') then
+      if kind == 'file' and name:match('%.jsonl$') and not committed(wt, name:sub(1, -7)) then
         local ok, review = pcall(M.load, reviews_dir(wt) .. '/' .. name, 'human')
         if ok and not review.closed then found[#found + 1] = review end
       end
@@ -324,7 +334,12 @@ function M.find(handle, cwd)
   end
   for _, root in ipairs(roots) do
     local log = reviews_dir(root) .. '/' .. id .. '.jsonl'
-    if vim.uv.fs_stat(log) then return log, n end
+    if vim.uv.fs_stat(log) then
+      if committed(root, id) then
+        error(('review %s is committed to this repo, so someone else wrote it; critique only opens reviews made here'):format(id), 0)
+      end
+      return log, n
+    end
   end
   error(('no review %s here; run `critique ls` in its repo, or use %s@<path>'):format(id, id), 0)
 end
