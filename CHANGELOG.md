@@ -13,6 +13,8 @@ lazy.nvim, `version = '*'` follows them.
 
 ### Changed
 
+- The README shows each feature with a short clip next to it (suggesting by editing, opening a PR,
+  coming back to a review), keeping the two long demos for the full flows.
 - The footer on GitHub comments shows the logo, small, before "Made with critique.nvim". Footers from
   earlier versions are still hidden in Neovim.
 

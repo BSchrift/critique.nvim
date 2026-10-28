@@ -15,7 +15,7 @@ Code review in Neovim, for **your AI agent's changes** and for **GitHub pull req
 
 ![critique.nvim with Claude Code](demo/agent.gif)
 
-**[▸ Review GitHub pull requests](#review-github-pull-requests)** &nbsp;·&nbsp; **[▸ Review your AI agent's work](#review-your-ai-agents-changes)**
+**[▸ Review GitHub pull requests](#review-github-pull-requests)** &nbsp;·&nbsp; **[▸ Review your AI agent's work](#review-your-ai-agents-changes)** &nbsp;·&nbsp; **[▸ Suggest by editing](#suggest-changes-by-editing-the-code)**
 
 - **Review your agent's work like a pull request.** The agent hands you its changes as a review.
   You comment on lines in Neovim, the agent answers in the same threads, fixes things, and hands it
@@ -28,6 +28,14 @@ Code review in Neovim, for **your AI agent's changes** and for **GitHub pull req
   suggestions: on GitHub the author commits them with one click, and an agent applies them.
 - **Pick up where you left off.** When the author pushes fixes, see only what changed since your last
   review, tick files off as viewed, and step through the open threads.
+
+## Suggest changes by editing the code
+
+![Editing a line and saving: critique previews the edit as a suggestion and posts it](demo/clips/suggest.gif)
+
+Change the code right in the file, the way you'd fix it yourself, and `:w`. Nothing is written to disk:
+critique shows your edits as suggestions, and `y` posts them. On a GitHub PR, the author commits a
+suggestion with one click; an agent applies it as written. `:Critique suggest` does the same without `:w`.
 
 ## Features
 
@@ -115,7 +123,11 @@ including links to a specific file, line, or comment (`…/pull/123/changes#diff
 
 critique downloads just the PR's commits and files, not the repo's history, and shows git's progress
 while it does. On neovim/neovim, a first open takes about 8 seconds and 15 MB, where a full clone would take
-about 15 seconds and 70 MB. Later opens only fetch what changed. Then:
+about 15 seconds and 70 MB. Later opens only fetch what changed.
+
+![Opening a neovim/neovim PR: the progress line, then the PR](demo/clips/download.gif)
+
+Then:
 
 1. **Find your way around.** The changed files are in the quickfix list (`:cnext` / `:cprev`), and
    `]c` / `[c` jump between changes in a file. You can open any other file with your usual tools.
@@ -132,17 +144,35 @@ about 15 seconds and 70 MB. Later opens only fetch what changed. Then:
 5. **Share a line.** `:Critique link` copies a permalink to the cursor line (or a visual
    selection) to your clipboard, ready to paste into Slack or a ticket.
 6. **Submit.** `:Critique submit` asks for Comment / Approve / Request changes and an optional summary.
-7. **Come back.** When the PR has new commits since your review, critique says so when you open it;
-   `:Critique since` shows only those. `:Critique overview` shows the description, checks, and conversation.
-
-![Coming back to a PR: what changed since your review, a suggestion made by editing, files marked viewed, and the open threads](demo/features.gif)
-
-<sub>Coming back to a PR after the author pushed fixes: the overview, only what changed since your
-review, a suggestion made by editing the code, files marked viewed, and the list of open threads.
-Full quality: [demo/features.mp4](demo/features.mp4)</sub>
+7. **Come back.** When the PR has new commits since your review, critique says so when you open it.
+   See [Coming back to a review](#coming-back-to-a-review).
 
 Until you submit, your comments are a pending review: they're saved on GitHub but only you can see them.
 If you quit halfway, run `critique <url>` again and continue where you left off.
+
+## Coming back to a review
+
+When the author pushes fixes, or the agent hands back its next round, pick up where you left off. These
+work the same on GitHub PRs and in reviews with an agent.
+
+**Only what changed since your last review.** `:Critique since` narrows the diff and the file list to
+the changes made after you last reviewed; run it again to see everything.
+
+![:Critique since: only the changes made since your last review](demo/clips/since.gif)
+
+**Tick files off as you go.** `:Critique viewed` marks the file viewed and moves to the next one. On
+GitHub it's the same "Viewed" checkbox as on the website, and a file that changes afterwards shows ●.
+
+![:Critique viewed: files ticked off one by one](demo/clips/viewed.gif)
+
+**Every open thread in one list.** `:Critique threads` lists them in the quickfix window, tagged
+`needs your reply`, `pending`, or `outdated`; `]q` / `[q` step through them.
+
+![:Critique threads: the open threads, then resolving one](demo/clips/threads.gif)
+
+**The PR at a glance.** `:Critique overview` shows the description, the CI checks, and the conversation.
+
+![:Critique overview: a PR's description, checks, and conversation](demo/clips/overview.gif)
 
 ## Review your AI agent's changes
 
@@ -422,8 +452,7 @@ tests/run.sh               # every test, offline (unit tests, plus the CLI and N
 tests/run.sh cli local     # just some of them
 vhs demo/demo.tape         # re-record the GitHub demo (needs vhs; edit the PR URL first)
 vhs demo/agent.tape        # re-record the agent demo (needs vhs and Claude Code)
-demo/features-setup.sh     # stage a sandbox PR for the "coming back to a PR" demo, then put its URL in demo/features.tape
-vhs demo/features.tape     # re-record that demo
+for t in demo/clips/*.tape; do vhs "$t"; done   # re-record the short clips (most stage a local review themselves)
 ```
 
 ## License
