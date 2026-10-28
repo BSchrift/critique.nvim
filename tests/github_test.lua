@@ -24,15 +24,34 @@ vim.fn.mkdir(cache, 'p')
 H.git(cache, 'clone', '-q', '--bare', origin, cache .. '/repo.git')
 local checkout = cache .. '/pr-7'
 
+local FOOTER = '\n\n<sub>Made with [critique.nvim](https://github.com/BSchrift/critique.nvim)</sub>'
+local threads, overview = {}, nil -- what "GitHub" returns for the PR's threads, and for :Critique overview
 gh.gql = function(_, query)
-  assert(query:find('reviewThreads'), 'only the PR query is expected')
+  if query:find('statusCheckRollup') then return { repository = { pullRequest = overview } } end
+  assert(query:find('reviewThreads'), 'unexpected query')
   return { repository = { pullRequest = {
     id = 'PR_7', title = 'Change two', headRefOid = H.git(origin, 'rev-parse', 'pr'), baseRefOid = H.git(origin, 'rev-parse', 'main'),
-    reviews = { nodes = {} }, submitted = { nodes = {} }, files = { nodes = {} }, reviewThreads = { nodes = {} },
+    reviews = { nodes = {} }, submitted = { nodes = {} }, files = { nodes = {} }, reviewThreads = { nodes = vim.deepcopy(threads) },
   } } }
 end
+local sent = {} -- the mutations critique sends: { name, input }
+gh.mutate = function(_, name, input)
+  table.insert(sent, { name, input })
+  return ({
+    addPullRequestReview = { pullRequestReview = { id = 'R_1' } },
+    addPullRequestReviewThread = { thread = { id = 'T_1', comments = { nodes = { { id = 'C_1' } } } } },
+    addPullRequestReviewThreadReply = { comment = { id = 'C_2' } },
+  })[name] or {}
+end
+local function last_sent(name)
+  for i = #sent, 1, -1 do
+    if sent[i][1] == name then return sent[i][2] end
+  end
+end
 
-local function open()
+-- Opens the PR, with `with_threads` as its review threads on "GitHub".
+local function open(with_threads)
+  threads = with_threads or {}
   local before = #messages
   vim.cmd('silent! %bwipeout!')
   vim.cmd('Critique open ' .. URL)
@@ -64,6 +83,94 @@ H.test('reopening after new commits stashes edits in their way, instead of faili
   H.has(msgs[#msgs], 'stash pop')
   H.has(H.git(checkout, 'stash', 'list'), 'critique: your edits, set aside to reopen PR #7')
   H.has(H.git(checkout, 'stash', 'show', '-p'), '+mine')
+end)
+
+H.section('the critique.nvim footer')
+local function below_mark()
+  local lines = vim.api.nvim_buf_get_lines(0, 0, -1, false)
+  local at = vim.iter(ipairs(lines)):find(function(_, l) return l:find('▼ write below', 1, true) end)
+  return vim.list_slice(lines, at + 1)
+end
+local function write_comment(text)
+  local before = #messages
+  local lines = vim.api.nvim_buf_get_lines(0, 0, -1, false)
+  local at = vim.iter(ipairs(lines)):find(function(_, l) return l:find('▼ write below', 1, true) end)
+  vim.api.nvim_buf_set_lines(0, at, -1, false, { text })
+  vim.cmd('write')
+  H.wait_for(function() return #messages > before end, 'the save')
+  vim.cmd('quit')
+end
+local function on_line(path, n)
+  vim.cmd.edit(checkout .. '/' .. path)
+  vim.api.nvim_win_set_cursor(0, { n, 0 })
+end
+
+H.test('a new comment ends with the footer', function()
+  open()
+  on_line('a.txt', 2)
+  vim.cmd('Critique comment')
+  write_comment('Why the bang?')
+  H.eq(last_sent('addPullRequestReviewThread').body, 'Why the bang?' .. FOOTER)
+end)
+H.test("editing your comment shows it without the footer and saves it with exactly one", function()
+  open({ { id = 'T_1', isResolved = false, isOutdated = false, path = 'a.txt', line = 2, diffSide = 'RIGHT', comments = { nodes = {
+    { id = 'C_1', databaseId = 1, body = 'Old text' .. FOOTER, state = 'PENDING', viewerDidAuthor = true, author = { login = 'me' } },
+  } } } })
+  on_line('a.txt', 2)
+  local marks = vim.api.nvim_buf_get_extmarks(0, vim.api.nvim_create_namespace('critique.threads'), 0, -1, { details = true })
+  H.eq(marks[1][4].virt_text[1][1], ' 💬 (1) · me: Old text')
+  vim.cmd('Critique comment')
+  H.eq(below_mark(), { 'Old text' })
+  write_comment('New text')
+  H.eq(last_sent('updatePullRequestReviewComment').body, 'New text' .. FOOTER)
+end)
+H.test('suggestions and review summaries end with it too; an empty summary stays empty', function()
+  open()
+  on_line('a.txt', 2)
+  vim.api.nvim_buf_set_lines(0, 1, 2, false, { 'TWO' })
+  vim.cmd('write')
+  H.wait_for(function()
+    return vim.iter(vim.api.nvim_list_wins()):any(function(w) return vim.api.nvim_win_get_config(w).relative ~= '' end)
+  end, 'the suggestion window')
+  vim.api.nvim_feedkeys('y', 'x', false)
+  H.wait_for(function() return messages[#messages].msg:find('suggestion saved', 1, true) end, 'the suggestion')
+  H.eq(last_sent('addPullRequestReviewThread').body, '```suggestion\nTWO\n```' .. FOOTER)
+  local select, input = vim.ui.select, vim.ui.input
+  for _, summary in ipairs({ 'Looks good', '' }) do
+    vim.ui.select = function(items, _, cb) cb(items[1]) end
+    vim.ui.input = function(_, cb) cb(summary) end
+    local before = #messages
+    vim.cmd('Critique submit')
+    H.wait_for(function() return #messages > before end, 'the submit')
+  end
+  vim.ui.select, vim.ui.input = select, input
+  local submits = vim.tbl_filter(function(m) return m[2].event ~= nil end, sent) -- submitting a pending review, or a new one
+  H.eq({ submits[#submits - 1][2].body, submits[#submits][2].body }, { 'Looks good' .. FOOTER, nil })
+end)
+H.test('footer = false leaves it off', function()
+  require('critique').setup({ footer = false })
+  local ok, err = pcall(function()
+    open()
+    on_line('a.txt', 2)
+    vim.cmd('Critique comment')
+    write_comment('Plain')
+    H.eq(last_sent('addPullRequestReviewThread').body, 'Plain')
+  end)
+  require('critique').setup({ footer = true })
+  assert(ok, err)
+end)
+H.test("the overview doesn't show footers", function()
+  overview = { url = URL, body = 'Desc', state = 'OPEN', isDraft = false, baseRefName = 'main', headRefName = 'pr', author = { login = 'me' },
+    commits = { nodes = {} }, comments = { nodes = { { author = { login = 'amy' }, body = 'Ship it' .. FOOTER, createdAt = '2026-10-27T10:00:00Z' } } },
+    reviews = { nodes = { { author = { login = 'me' }, body = FOOTER, state = 'COMMENTED', submittedAt = '2026-10-27T11:00:00Z' } } } }
+  open()
+  vim.cmd('Critique overview')
+  H.wait_for(function() return vim.api.nvim_buf_get_name(0) == 'critique://overview' end, 'the overview')
+  local text = table.concat(vim.api.nvim_buf_get_lines(0, 0, -1, false), '\n')
+  H.has(text, '### amy · 2026-10-27\n\nShip it')
+  H.lacks(text, 'critique.nvim')
+  H.lacks(text, '### me', 'a review that was only a footer is a bare review')
+  vim.cmd('quit')
 end)
 
 H.done()

@@ -190,6 +190,10 @@ Write your comment below it. `:w` saves it to your pending review on GitHub
 (in a local review: a draft the agent sees after `:Critique submit`); saving
 again updates the same comment. `:q` closes the buffer.
 
+On GitHub, the comment ends with a small "Made with critique.nvim" link
+(|critique-config| turns it off). critique hides it when it shows comments,
+so it is never in the buffer you edit.
+
 On GitHub PRs, you can only comment on lines inside a diff hunk: changed
 lines plus up to 3 lines of context around them. Their line numbers are
 tinted (|hl-CritiqueHunk|). Local reviews allow any line of any file. To
@@ -337,7 +341,9 @@ The loop ~
 5. Repeat until you submit with nothing left open.
 
 Agents learn this from the critique skill. See the README for installing it
-in Claude Code, Codex, Cursor, and other agents. `critique -h` lists the
+in Claude Code, Codex, Cursor, and other agents. The skill also has an agent
+end the commits of work you reviewed with a `Developed-with: critique` trailer
+linking here, unless you or the repo's instructions say not to add trailers. `critique -h` lists the
 shell commands: start, ls, status, list, show, diff, comment, reply,
 resolve, unresolve, edit, delete, submit, wait, watch, ack, close.
 
@@ -436,5 +442,11 @@ auto_suggest        (default: true)
     `:w` in a review file asks to post your edits as suggestions
     (|critique-suggestions|) instead of saving them. When off, `:w` saves as
     usual and |:Critique-suggest| asks.
+
+footer              (default: true)
+    Comments, suggestions, and review summaries you post on GitHub end with
+    a small "Made with critique.nvim" link to the plugin. critique hides it
+    when it shows comments (yours and others'), so editing a comment never
+    adds a second one. Local reviews never have it.
 
  vim:tw=78:ts=8:ft=help:norl:

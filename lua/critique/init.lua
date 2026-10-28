@@ -5,6 +5,7 @@ local store = require('critique.store')
 local M = {}
 M.config = {
   auto_suggest = true, -- :w in a review file posts your edits as suggestions instead of saving them
+  footer = true, -- comments you post on GitHub end with "Made with critique.nvim"
 }
 
 -- require('critique').setup({ auto_suggest = false }), or lazy.nvim's `opts`. Optional: the defaults work as they are.
@@ -18,6 +19,12 @@ local MARK = { github = '<!-- ▼ write below · :w saves to your pending review
   ['local'] = '<!-- ▼ write below · :w saves a draft · :q closes ▼ -->',
   live = '<!-- ▼ write below · :w sends it to the agent · :q closes ▼ -->' }
 local S -- the open review
+
+local FOOTER = '\n\n<sub>Made with [critique.nvim](https://github.com/BSchrift/critique.nvim)</sub>'
+-- A GitHub comment as you post it, with the footer (config.footer)...
+local function signed(body) return M.config.footer and body .. FOOTER or body end
+-- ...and as critique shows it, without (anyone's, any version's), so editing never stacks a second one.
+local function unsigned(body) return (body:gsub('%s*<sub>[^\n]*critique%.nvim[^\n]*</sub>%s*$', '')) end
 
 -- shortcut: first 100 threads, 100 comments per thread, and 100 files' viewed marks; paginate if PRs outgrow that.
 local PR_QUERY = [[
@@ -210,6 +217,7 @@ local function fetch_pr(st)
   end
   st.threads = vim.tbl_map(function(t)
     t.comments, t.outdated = t.comments.nodes, t.isOutdated
+    for _, c in ipairs(t.comments) do c.body = unsigned(c.body) end
     t.line = t.line or t.originalLine -- an outdated thread stays where its code was, as in local reviews
     return t
   end, pr.reviewThreads.nodes)
@@ -402,12 +410,12 @@ local function post(ctx, body)
       ctx.comment = { id = ev.id }
     end
   elseif ctx.comment then
-    gh.mutate(S.host, 'updatePullRequestReviewComment', { pullRequestReviewCommentId = ctx.comment.id, body = body })
+    gh.mutate(S.host, 'updatePullRequestReviewComment', { pullRequestReviewCommentId = ctx.comment.id, body = signed(body) })
   elseif ctx.thread then
-    local input = { pullRequestReviewThreadId = ctx.thread.id, pullRequestReviewId = ensure_review(), body = body }
+    local input = { pullRequestReviewThreadId = ctx.thread.id, pullRequestReviewId = ensure_review(), body = signed(body) }
     ctx.comment = gh.mutate(S.host, 'addPullRequestReviewThreadReply', input, 'comment { id }').comment
   else
-    local input = vim.tbl_extend('force', ctx.anchor, { pullRequestReviewId = ensure_review(), body = body })
+    local input = vim.tbl_extend('force', ctx.anchor, { pullRequestReviewId = ensure_review(), body = signed(body) })
     local t = gh.mutate(S.host, 'addPullRequestReviewThread', input, 'thread { id comments(first: 1) { nodes { id } } }').thread
     if not t then error('GitHub rejected the comment', 0) end
     ctx.comment = t.comments.nodes[1]
@@ -910,7 +918,7 @@ function cmds.submit()
   if not event then return end
   local body = gh.await(vim.ui.input, { prompt = 'Summary (optional): ' })
   if not body then return end
-  body = body ~= '' and body or nil
+  body = body ~= '' and signed(body) or nil
   if S.review_id then
     gh.mutate(S.host, 'submitPullRequestReview', { pullRequestReviewId = S.review_id, event = event, body = body })
   else
@@ -1018,11 +1026,12 @@ function cmds.overview()
     vim.list_extend(lines, rest)
     vim.list_extend(lines, { '', '## Description', '' })
     vim.list_extend(lines, pr.body ~= '' and split(pr.body) or { '_No description._' })
-    for _, c in ipairs(pr.comments.nodes) do table.insert(entries, { who = login(c), at = c.createdAt, body = c.body }) end
+    for _, c in ipairs(pr.comments.nodes) do table.insert(entries, { who = login(c), at = c.createdAt, body = unsigned(c.body) }) end
     for _, r in ipairs(pr.reviews.nodes) do
-      if r.body ~= '' or r.state ~= 'COMMENTED' then -- a bare COMMENTED review is just its threads, which are on the code
+      local body = unsigned(r.body)
+      if body ~= '' or r.state ~= 'COMMENTED' then -- a bare COMMENTED review is just its threads, which are on the code
         local verdict = ({ APPROVED = ' approved', CHANGES_REQUESTED = ' requested changes', DISMISSED = ' (dismissed)' })[r.state] or ''
-        table.insert(entries, { who = login(r) .. verdict, at = r.submittedAt, body = r.body })
+        table.insert(entries, { who = login(r) .. verdict, at = r.submittedAt, body = body })
       end
     end
     table.sort(entries, function(a, b) return a.at < b.at end)

@@ -76,6 +76,7 @@ Everything new is in the [changelog](CHANGELOG.md).
 **Reviewing GitHub pull requests**
 - Open any PR link, including links to a file, line, or comment, and critique jumps there.
 - Comments go to a pending GitHub review as you save them. Submit as Comment, Approve, or Request changes.
+  Each one ends with a small "Made with critique.nvim" link (`footer = false` turns it off).
 - Read and reply to other reviewers' threads, and resolve them.
 - `:Critique link` copies a permalink to the current line or range.
 - Private repos and GitHub Enterprise work through your existing `gh` login, with no extra setup.
@@ -188,6 +189,10 @@ through that command. Then give your agent the critique skill, which teaches it 
 | **Codex, Cursor**, and other agents that read `~/.agents/skills` | `mkdir -p ~/.agents/skills && ln -s ~/.local/share/nvim/lazy/critique.nvim/skills/critique ~/.agents/skills/critique` |
 | **Any other agent** (Gemini CLI, Aider, …) | Paste [skills/critique/SKILL.md](skills/critique/SKILL.md), without the `---` header, into its instructions file (`AGENTS.md`, `GEMINI.md`, …) |
 
+When the agent commits work you reviewed in critique, the skill has it end the commit message with a
+`Developed-with: critique (https://github.com/BSchrift/critique.nvim)` trailer. To leave it out, tell
+your agent not to add trailers (in `CLAUDE.md`, `AGENTS.md`, or the like).
+
 Linking instead of copying keeps the skill up to date when the plugin updates. To set it up for one
 repo only, link it into that repo's `.claude/skills/` or `.agents/skills/` instead. If your plugin
 manager isn't lazy.nvim, adjust the plugin path as in step 3.
@@ -245,14 +250,18 @@ Other plugin managers work the same way: add `BSchrift/critique.nvim`. Nothing n
 To follow tagged releases instead of the latest commit, add `version = '*'` (see the
 [changelog](CHANGELOG.md)).
 
-The one option: `:w` in a review file asks to post your edits as suggestions. To have `:w` save as
-usual instead (and use `:Critique suggest` when you want suggestions), turn it off:
+Two options, both on by default:
+
+- `auto_suggest`: `:w` in a review file asks to post your edits as suggestions. Turn it off to have `:w`
+  save as usual (`:Critique suggest` still asks), and if you use an auto-save plugin that saves as you
+  type; see `:help critique-suggestions`.
+- `footer`: comments and review summaries you post on GitHub end with a small "Made with
+  [critique.nvim](https://github.com/BSchrift/critique.nvim)" link. critique hides it again when it
+  shows comments, so you never edit it.
 
 ```lua
-{ 'BSchrift/critique.nvim', opts = { auto_suggest = false } }
+{ 'BSchrift/critique.nvim', opts = { auto_suggest = false, footer = false } }
 ```
-
-Turn it off if you use an auto-save plugin that saves as you type; see `:help critique-suggestions`.
 
 ### 3. Add the `critique` command
 

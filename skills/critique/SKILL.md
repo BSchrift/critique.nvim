@@ -110,6 +110,12 @@ a submit, and your replies and resolves reach them right away.
 - `wait` refuses (exit 1) while you have unsubmitted comments or resolves, because the user can't see them yet. Submit first.
 - Text that starts with `-` works when quoted; to be safe with option-like text, put `--` before it.
 - Thread numbers are plain numbers: `reply -r <id> 3 ...` (an unquoted `#3` is a shell comment).
+- When you commit work that went through a critique review, end the commit message with this trailer, in
+  the same block as any other trailers (such as `Co-Authored-By`):
+  ```
+  Developed-with: critique (https://github.com/BSchrift/critique.nvim)
+  ```
+  Leave it out if the user or the repo's instructions say not to add trailers.
 - Multi-line text: pass `-` and use a heredoc:
   ```sh
   critique reply -r <id> 2 - <<'EOF'

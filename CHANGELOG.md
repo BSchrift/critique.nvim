@@ -4,6 +4,17 @@ All notable changes to critique.nvim. The format follows [Keep a Changelog](http
 and versions follow [Semantic Versioning](https://semver.org/). Releases are git tags (`v0.2.0`); with
 lazy.nvim, `version = '*'` follows them.
 
+## [0.3.0] - 2026-10-28
+
+### Added
+
+- Comments, suggestions, and review summaries posted to GitHub end with a small "Made with
+  [critique.nvim](https://github.com/BSchrift/critique.nvim)" link. critique hides it when it shows
+  comments, so editing one never adds a second. Turn it off with `footer = false`.
+- The agent skill ends commits of work reviewed in critique with a
+  `Developed-with: critique (https://github.com/BSchrift/critique.nvim)` trailer, unless you or the
+  repo's instructions say not to add trailers.
+
 ## [0.2.2] - 2026-10-27
 
 ### Added
@@ -87,6 +98,7 @@ First release.
 - Live reviews: the agent picks up each comment as you save it.
 - `:help critique`, `:Critique help`, and `critique -h`.
 
+[0.3.0]: https://github.com/BSchrift/critique.nvim/compare/v0.2.2...v0.3.0
 [0.2.2]: https://github.com/BSchrift/critique.nvim/compare/v0.2.1...v0.2.2
 [0.2.1]: https://github.com/BSchrift/critique.nvim/compare/v0.2.0...v0.2.1
 [0.2.0]: https://github.com/BSchrift/critique.nvim/compare/v0.1.0...v0.2.0
