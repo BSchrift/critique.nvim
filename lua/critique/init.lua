@@ -513,7 +513,8 @@ local function edit(ctx)
   vim.api.nvim_buf_set_lines(buf, 0, -1, false, lines)
   vim.bo[buf].modified = false
   vim.api.nvim_win_set_cursor(0, { #lines, 0 })
-  vim.api.nvim_create_autocmd('BufWriteCmd', { buffer = buf, callback = gh.async(function() save(buf, ctx) end) })
+  -- Wait for the save (GitHub's API), so :wq closes the comment once it's saved, and leaves it open if it failed.
+  vim.api.nvim_create_autocmd('BufWriteCmd', { buffer = buf, callback = function() gh.wait(function() save(buf, ctx) end) end })
 end
 
 local diff_text = vim.text and vim.text.diff or vim.diff -- vim.diff is deprecated from Neovim 0.12

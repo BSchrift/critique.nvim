@@ -17,6 +17,20 @@ function M.async(fn)
   return function(...) step(coroutine.create(fn), ...) end
 end
 
+-- Runs fn like M.async, but waits for it to finish (it can still await) and returns whether it worked; an error
+-- is shown, as with M.async. For autocommands that need the outcome now, like :wq on a comment.
+function M.wait(fn, ms)
+  local co, result = coroutine.create(fn), nil
+  finished[co] = function(ok, err) result = { ok, err } end
+  step(co)
+  if not vim.wait(ms or 60000, function() return result ~= nil end, 10) then
+    vim.notify('critique: still waiting for GitHub; check that the comment arrived', vim.log.levels.WARN)
+    return false
+  end
+  if not result[1] then vim.notify('critique: ' .. tostring(result[2]), vim.log.levels.ERROR) end
+  return result[1]
+end
+
 -- Call a callback-last function from inside M.async and return what it passes to the callback.
 function M.await(fn, ...)
   local co, n, args = coroutine.running(), select('#', ...), { ... }

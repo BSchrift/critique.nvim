@@ -64,9 +64,11 @@ gh.gql = function(_, query, vars)
     submitted = { nodes = reviewed and { { viewerDidAuthor = true, commit = { oid = reviewed } } } or {} },
   } } }
 end
-local sent = {} -- the mutations critique sends: { name, input }
+local sent, offline = {}, false -- the mutations critique sends: { name, input }; offline makes them fail
 gh.mutate = function(_, name, input)
   table.insert(sent, { name, input })
+  gh.await(function(cb) vim.defer_fn(cb, 30) end) -- GitHub takes a moment to answer
+  if offline then error('error connecting to api.github.example', 0) end
   return ({
     addPullRequestReview = { pullRequestReview = { id = 'R_1' } },
     addPullRequestReviewThread = { thread = { id = 'T_1', comments = { nodes = { { id = 'C_1' } } } } },
@@ -247,6 +249,26 @@ H.test('suggestions and review summaries end with it too; an empty summary stays
   vim.ui.select, vim.ui.input = select, input
   local submits = vim.tbl_filter(function(m) return m[2].event ~= nil end, sent) -- submitting a pending review, or a new one
   H.eq({ submits[#submits - 1][2].body, submits[#submits][2].body }, { 'Looks good' .. FOOTER, nil })
+end)
+H.test(':wq saves the comment and closes it; if the save fails, the comment stays open', function()
+  open()
+  on_line('a.txt', 2)
+  vim.cmd('Critique comment')
+  local lines = vim.api.nvim_buf_get_lines(0, 0, -1, false)
+  vim.api.nvim_buf_set_lines(0, #lines - 1, -1, false, { 'Saved and closed' })
+  vim.cmd('wq')
+  H.eq({ last_sent('addPullRequestReviewThread').body, vim.api.nvim_buf_get_name(0):find('critique://comment', 1, true) },
+    { 'Saved and closed' .. FOOTER, nil })
+  vim.cmd('Critique comment')
+  lines = vim.api.nvim_buf_get_lines(0, 0, -1, false)
+  vim.api.nvim_buf_set_lines(0, #lines - 1, -1, false, { 'Not sent' })
+  offline = true
+  pcall(vim.cmd, 'wq')
+  offline = false
+  H.ok(vim.api.nvim_buf_get_name(0):find('critique://comment', 1, true), 'still open')
+  H.eq(vim.api.nvim_buf_get_lines(0, -2, -1, false), { 'Not sent' })
+  H.has(messages[#messages].msg, 'error connecting')
+  vim.cmd('quit!')
 end)
 H.test('footer = false leaves it off', function()
   require('critique').setup({ footer = false })

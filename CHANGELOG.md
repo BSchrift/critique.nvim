@@ -24,6 +24,9 @@ lazy.nvim, `version = '*'` follows them.
 
 ### Fixed
 
+- `:wq` in a comment on a GitHub PR saved the comment but left it open, since it closed before GitHub
+  answered. It now waits for the save (usually under a second), and keeps the comment open if the
+  save fails.
 - A bare `:Critique` during a GitHub review replaced it with a local review of the PR's checkout (or of
   another PR's), after which `:Critique comment` said your file wasn't in the review. `:Critique open`
   with no argument now refuses inside critique's own PR checkouts.

@@ -147,4 +147,18 @@ H.test('merge_base asks GitHub to compare the two commits, on the right host', f
   H.eq(vim.list_slice(sent.cmd, 1, 5), { 'gh', 'api', '--hostname', 'ghe.example.com', 'repos/o/r/compare/b1...h1?per_page=1' })
 end)
 
+H.section('wait: finishing before an autocommand returns')
+H.test('waits for steps that await, and says whether they worked', function()
+  local done = false
+  H.eq(gh.wait(function() after(50) done = true end), true)
+  H.eq(done, true)
+end)
+H.test('an error is shown and reported as not working', function()
+  local notify, shown = vim.notify, nil
+  vim.notify = function(m) shown = m end
+  local ok = gh.wait(function() after(20) error('GitHub said no', 0) end)
+  vim.notify = notify
+  H.eq({ ok, shown }, { false, 'critique: GitHub said no' })
+end)
+
 H.done()
