@@ -804,7 +804,8 @@ H.test("watch streams the human's activity in batches, and ends when the review 
   human_comment(log, { body = 'Why + 0?' })
   local t = store.load(log, 'agent').threads[1].id
   human(log, { type = 'comment', id = store.new_id(), thread = t, body = 'and a test' })
-  H.wait_for(function() return table.concat(out):find('and a test', 1, true) end, 'the first batch', 10000)
+  -- The hint line ends a batch: wait for it, since the lines can arrive in separate reads.
+  H.wait_for(function() return table.concat(out):find('(critique list -r ', 1, true) end, 'the first batch', 10000)
   local first = table.concat(out)
   H.has(first, '#1 new · cart/cart.go:4 · Tester: Why + 0?')
   H.has(first, '#1 reply · Tester: and a test')
