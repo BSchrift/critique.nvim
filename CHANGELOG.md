@@ -17,6 +17,9 @@ lazy.nvim, `version = '*'` follows them.
 - On a PR with more than 100 threads, the newest didn't show, so a comment you saved vanished and
   commenting on its line started a second thread. On a PR with more than 100 files, viewed marks
   past the 100th were lost. critique now loads all of them.
+- Reopening a PR failed when a new file of yours in its checkout was in the way of its new commits. The
+  stash now takes new files too. If the checkout still fails, the error says where your stashed edits
+  went; it used to leave them in the stash without a word.
 
 ## [0.8.0] - 2026-10-28
 

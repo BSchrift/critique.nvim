@@ -838,6 +838,13 @@ local function open_local(handle)
   vim.schedule(function() notify(msg) end) -- after startup's first redraw, which would wipe it when opened via `nvim -c`
 end
 
+-- Where your edits in a PR's checkout went when they were in the way of its new commits.
+local function stash_note(files, wt)
+  return ("your edits to %s in the PR's checkout were in the way of its new commits, so they're stashed. "
+    .. 'To get them back: git -C %s stash pop'):format(#files <= 3 and table.concat(files, ', ') or plural(#files, 'file'),
+    vim.fn.shellescape(wt))
+end
+
 function cmds.open(o)
   local url = table.concat(o.fargs, ' ', 2) -- handles can contain spaces (a checkout path)
   local host, owner, name, number = url:match('^https?://([^/]+)/([^/]+)/([^/]+)/pull/(%d+)')
@@ -884,12 +891,15 @@ function cmds.open(o)
       must(fetch_files(git_dir, pr.headRefOid, progress.show))
       progress.set('checking out the files')
       local ok, err = gh.git_progress(wt, progress.show, { 'checkout', '--progress', '--detach', pr.headRefOid })
-      if not ok and not fresh then
+      local edited = not ok and not fresh and vim.tbl_map(function(l) return l:sub(4) end, -- "XY path"
+        vim.split(gh.git(wt, 'status', '--porcelain', '--untracked-files=all'), '\n', { trimempty = true }))
+      if edited and #edited > 0 then
         -- Edits in the checkout are in the way of the new commits (saved with auto_suggest off, by an auto-save
-        -- plugin, or by critique before 0.2). Stash them, so nothing is lost, and try again.
-        st.stashed = vim.split(vim.trim(gh.git(wt, 'diff', 'HEAD', '--name-only')), '\n', { trimempty = true })
-        gh.git(wt, 'stash', 'push', '-m', ('critique: your edits, set aside to reopen PR #%d'):format(st.number))
+        -- plugin, or by critique before 0.2). Stash them, new files too, so nothing is lost, and try again.
+        gh.git(wt, 'stash', 'push', '--include-untracked', '-m', ('critique: your edits, set aside to reopen PR #%d'):format(st.number))
+        st.stashed = edited
         ok, err = gh.git_progress(wt, progress.show, { 'checkout', '--progress', '--detach', pr.headRefOid })
+        if not ok then err = err .. '\n' .. stash_note(edited, wt) end
       end
       must(ok, err)
     end,
@@ -907,11 +917,7 @@ function cmds.open(o)
   goto_anchor(url)
   notify(('%s · %s changed%s'):format(S.title, plural(#S.files, 'file'),
     S.reviewed and S.reviewed ~= S.head and ' · new commits since your last review: :Critique since' or ''))
-  if st.stashed then
-    local files = #st.stashed <= 3 and table.concat(st.stashed, ', ') or plural(#st.stashed, 'file')
-    notify(("your edits to %s in the PR's checkout were in the way of its new commits, so they're stashed. "
-      .. 'To get them back: git -C %s stash pop'):format(files, vim.fn.shellescape(wt)), vim.log.levels.WARN)
-  end
+  if st.stashed then notify(stash_note(st.stashed, wt), vim.log.levels.WARN) end
 end
 
 -- Shows the review's list of files or threads, even when another quickfix list is the current one.
