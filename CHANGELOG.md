@@ -26,6 +26,8 @@ lazy.nvim, `version = '*'` follows them.
 - In local reviews, a thread on a line that appears more than once (`return err`) could jump to another copy
   of it when code was added above. New threads remember the lines around them and stay on their own copy;
   when it can't tell the copies apart, the thread shows as outdated instead of on the wrong line.
+- A local review write that was cut short (a full disk, a crash) made the whole review unreadable, and
+  the next comment was lost with it. The broken line is skipped now, and the next write starts a new line.
 
 ## [0.8.0] - 2026-10-28
 

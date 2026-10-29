@@ -46,7 +46,10 @@ end
 function M.append(log, ev)
   ev.at = os.date('!%Y-%m-%dT%H:%M:%SZ')
   local line = vim.json.encode(ev) .. '\n'
-  local fd = assert(vim.uv.fs_open(log, 'a', 420))
+  local fd = assert(vim.uv.fs_open(log, 'a+', 420))
+  -- After a write that was cut short, start a fresh line, so this event isn't lost with it.
+  local size = vim.uv.fs_fstat(fd).size
+  if size > 0 and vim.uv.fs_read(fd, 1, size - 1) ~= '\n' then line = '\n' .. line end
   local written, err = vim.uv.fs_write(fd, line)
   vim.uv.fs_close(fd)
   if written ~= #line then error(('could not save to %s: %s'):format(log, err or 'disk full?'), 0) end
@@ -144,7 +147,8 @@ function M.events(log)
   table.remove(lines) -- after the last newline: empty, or a partial write
   for seq, line in ipairs(lines) do
     local ok, ev = pcall(vim.json.decode, line, { luanil = { object = true, array = true } })
-    if not ok then error(('%s line %d is not valid JSON'):format(log, seq), 0) end
+    -- A write cut short (a full disk, a crash) is lost, but must not take the rest of the review with it.
+    if not ok or type(ev) ~= 'table' then ev = { type = 'unreadable' } end
     ev.seq = seq
     events[seq] = ev
   end
@@ -240,6 +244,7 @@ function M.load(log, viewer)
     end
   end
 
+  if not review.base then error(log .. ' has no readable start line, so it is not a review', 0) end
   for _, c in ipairs(drafts) do -- your own unsubmitted replies reopen their threads in your own view
     local t = threads[c.thread]
     if c.pending and c.role == viewer and c.reopens and not c.deleted and t and t.resolved and (t.resolved_seq or 0) < c.seq then
