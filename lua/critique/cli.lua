@@ -265,16 +265,32 @@ function C.comment(o)
   end
 end
 
+-- The human's comments on thread t that you haven't read (see store.unread), one per line.
+local function unread_lines(t)
+  return table.concat(vim.tbl_map(function(c)
+    return ('  %s [%s]: %s'):format(who(c), c.id, (c.body:gsub('\n', '\n      ')))
+  end, store.unread(t)), '\n')
+end
+
+-- What the human added to t after your ack, which your reply or resolve can't have taken into account.
+local function after_ack(r, t)
+  return ('the human wrote on #%d after your ack:\n%s\nNext: critique ack -r %s %d (it marks this read), then reply or resolve.')
+    :format(t.n, unread_lines(t), r.id, t.n)
+end
+
 function C.reply(o)
   local r, log = open_review(o)
   local t = thread(r, o.pos[1])
   store.append(log, { type = 'comment', id = store.new_id(), thread = t.id, author = author(o, r), role = 'agent', body = text(o, 2) })
   out(('Replied on #%d.'):format(t.n))
+  t = thread(store.load(log, 'agent'), o.pos[1])
+  if t.seen_by_ack and #store.unread(t) > 0 then out('Note: ' .. after_ack(r, t)) end
 end
 
 local function set_resolved(o, resolved)
   local r, log = open_review(o)
   local t = thread(r, o.pos[1])
+  if resolved and t.seen_by_ack and #store.unread(t) > 0 then error(after_ack(r, t), 0) end
   store.append(log, { type = 'resolve', thread = t.id, resolved = resolved, author = author(o, r), role = 'agent' })
   out(('%s #%d.'):format(resolved and 'Resolved' or 'Reopened', t.n))
 end
@@ -351,6 +367,8 @@ function C.ack(o)
   local t = thread(r, o.pos[1])
   store.append(log, { type = 'ack', thread = t.id, author = author(o, r), role = 'agent' })
   out(("Marked #%d: you're on it. Reply or resolve when done."):format(t.n))
+  -- An ack marks the thread read, so show what it covers: the human may have added to it since you last looked.
+  if #store.unread(t) > 0 then out('It covers:\n' .. unread_lines(t)) end
 end
 
 -- The human's events after `since`, as one line each, once they are visible to the agent (drafts are not).

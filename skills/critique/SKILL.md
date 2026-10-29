@@ -97,8 +97,11 @@ a submit, and your replies and resolves reach them right away.
    `wait` and `watch` read the review's state, so restarting them never loses a comment. If you have to stop
    listening, tell the user, since their comments won't reach you until you start again.
 3. **For each comment you start on, acknowledge it first** so the user sees ⏳ on the thread:
-   `critique ack -r <id> 3`. Then handle it as in A5: change the code, reply, and resolve what you fixed.
-   No submit is needed for each one; use `critique submit` only to hand back a summary of a bigger batch.
+   `critique ack -r <id> 3`. It prints the comments it covers. Then handle it as in A5: change the code,
+   reply, and resolve what you fixed. No submit is needed for each one; use `critique submit` only to hand
+   back a summary of a bigger batch.
+   The user may add to a thread while you work on it. Then `reply` prints what they added, and `resolve`
+   refuses: run `critique ack -r <id> 3` again to read it, then answer it.
 4. Repeat until the user submits with nothing open or says they're done; then `critique close -r <id>`
    (which also ends `watch`).
 
@@ -142,7 +145,7 @@ a submit, and your replies and resolves reach them right away.
 | `critique submit -r <id> [--summary T]` | End your turn |
 | `critique wait -r <id> [--timeout S] [--settle S]` | Block until the user submits (live: until a comment needs you); exit 2 on timeout |
 | `critique watch -r <id> [--settle S]` | Stream the user's new comments as they arrive, until the review closes |
-| `critique ack -r <id> <n>` | Tell the user you're on thread n (shows ⏳ in Neovim) |
+| `critique ack -r <id> <n>` | Tell the user you're on thread n (shows ⏳ in Neovim); prints the comments it covers |
 | `critique close -r <id>` | Finish the review |
 | `critique ls` | Open reviews in this repo |
 

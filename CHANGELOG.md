@@ -11,6 +11,9 @@ lazy.nvim, `version = '*'` follows them.
 - Security: a review log committed to a repo could still reach your agent: in another capitalisation
   (`.critique/Reviews/`, the same folder on macOS), or behind a symlinked `.critique` or `reviews` folder.
   Those are ignored now too.
+- Live reviews: a comment you added to a thread, or an edit you made, after the agent started on it (its
+  `ack`) was lost if the agent then replied and resolved. The thread now still needs the agent: its `reply`
+  prints what you added, `resolve` refuses until it has read it, and `ack` prints the comments it covers.
 - Live reviews: editing a comment in Neovim didn't hold the agent back while you were still typing, and
   `critique watch` never told the agent you deleted one. Edits and deletes now say who made them.
 

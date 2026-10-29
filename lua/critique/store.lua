@@ -125,6 +125,19 @@ function M.events(log)
   return events
 end
 
+-- How far the agent has read a thread: to its last ack there, or, if it never acked, its last reply or resolve.
+-- After an ack, its replies answer what it read then, not what the human added since; only another ack moves it.
+local function saw(t, seq, ack)
+  if ack or not t.seen_by_ack then t.seen_seq, t.seen_by_ack = seq, ack end
+end
+
+-- The human's comments in a loaded thread that the agent hasn't read yet: written or edited since it last did.
+function M.unread(t)
+  return vim.tbl_filter(function(c)
+    return c.role == 'human' and math.max(c.seq, c.edited_seq or 0) > (t.seen_seq or 0)
+  end, t.comments)
+end
+
 -- Replays the log. `viewer` ("human" or "agent") sees its own drafts, but not the other side's until submitted.
 -- Comments from the other side since the viewer's last submit are marked `new`.
 -- In a live review, comments are published as they are written: there are no drafts.
@@ -151,7 +164,10 @@ function M.load(log, viewer)
         pending = not review.live, seq = seq }
       comments[ev.id] = c
       table.insert(drafts, c)
-      if threads[ev.thread] and ev.role == 'agent' then threads[ev.thread].ack = nil end -- a reply ends "on it"
+      if threads[ev.thread] and ev.role == 'agent' then -- a reply ends "on it"
+        saw(threads[ev.thread], seq, false)
+        threads[ev.thread].ack = nil
+      end
       -- Answering a resolved thread ("not quite") reopens it, so the agent sees it. A draft reopens it once it is
       -- submitted (or, for its writer, right away), unless it gets deleted: the agent must not learn about drafts.
       if threads[ev.thread] and ev.role == 'human' and threads[ev.thread].resolved then
@@ -168,14 +184,17 @@ function M.load(log, viewer)
       end
       if threads[ev.thread] then table.insert(threads[ev.thread].comments, c) end
     elseif ev.type == 'edit' and comments[ev.id] then
-      comments[ev.id].body = ev.body
+      comments[ev.id].body, comments[ev.id].edited_seq = ev.body, seq
     elseif ev.type == 'delete' and comments[ev.id] then
       comments[ev.id].deleted = true
     elseif ev.type == 'resolve' and threads[ev.thread] then
-      threads[ev.thread].resolved, threads[ev.thread].ack, threads[ev.thread].resolved_seq = ev.resolved, nil, seq
-      if ev.role == viewer and not review.live then table.insert(resolves, { seq = seq, n = threads[ev.thread].n }) end
+      local t = threads[ev.thread]
+      if ev.role == 'agent' then saw(t, seq, false) elseif not ev.resolved then t.reopened_seq = seq end
+      t.resolved, t.ack, t.resolved_seq = ev.resolved, nil, seq
+      if ev.role == viewer and not review.live then table.insert(resolves, { seq = seq, n = t.n }) end
     elseif ev.type == 'ack' and threads[ev.thread] then
       threads[ev.thread].ack = { author = ev.author, seq = seq }
+      saw(threads[ev.thread], seq, true)
     elseif ev.type == 'submit' then
       for _, c in ipairs(drafts) do
         if c.role == ev.role then
@@ -220,9 +239,8 @@ function M.load(log, viewer)
       if now and t.start_line then t.start_line = t.start_line + now - t.orig_line end
       t.line, t.outdated = now, now == nil
     end
-    -- Waiting on the agent: open, the human spoke last, and the agent hasn't said it's on it since.
-    local last = t.comments[#t.comments]
-    t.needs_agent = last ~= nil and not t.resolved and last.role == 'human' and not (t.ack and t.ack.seq > last.seq)
+    -- Waiting on the agent: open, and the human wrote, edited, or reopened something since the agent last read it.
+    t.needs_agent = not t.resolved and (#M.unread(t) > 0 or (t.reopened_seq or 0) > (t.seen_seq or 0))
     return #t.comments > 0
   end, review.threads)
   -- Live reviews have no strict turns: it's the agent's turn while something waits on it.
