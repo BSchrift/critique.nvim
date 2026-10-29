@@ -87,7 +87,7 @@ function M.load(st)
       more[key] = page[key].pageInfo.hasNextPage or nil
     end
   end
-  st.pr_id, st.review_id = pr.id, (pr.reviews.nodes[1] or {}).id
+  st.pr_id, st.review_id, st.latest = pr.id, (pr.reviews.nodes[1] or {}).id, pr.headRefOid -- latest: on GitHub now
   st.viewed = {}
   for _, f in ipairs(pr.files.nodes) do st.viewed[f.path] = ({ VIEWED = 'viewed', DISMISSED = 'changed' })[f.viewerViewedState] end
   for _, r in ipairs(pr.submitted.nodes) do

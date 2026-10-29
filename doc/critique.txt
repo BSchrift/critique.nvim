@@ -277,6 +277,11 @@ group in your config, e.g. >lua
   and checks it out. If edits saved in the worktree are in the way
   of new commits, critique stashes them first and tells you how to get them
   back.
+- When someone pushes while you review, critique notices on your next save
+  (or `:Critique refresh`) and asks once per push whether to load the new
+  commits. A comment you started before loading them asks to go on the line
+  where its code is now; if the new commits changed that code, it stays open
+  so you can copy your text.
 - The diff is `git diff <merge-base> <head>` with GitHub's settings: 3 lines
   of context, rename detection, Myers algorithm. Your git config can't change
   the hunks.

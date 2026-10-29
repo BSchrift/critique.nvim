@@ -271,6 +271,14 @@ local function refresh()
   if S.since then load_since() end -- your submit, or the agent's edits, change what "since" shows
   set_qf() -- also for viewed marks: a viewed file may have changed
   redraw()
+  if S.latest and S.latest ~= S.head and S.offered ~= S.latest then -- someone pushed: offer them, once per push
+    local st = S
+    st.offered = st.latest
+    vim.schedule(function() -- after what you just did has finished
+      if S ~= st or vim.fn.confirm(('PR #%d has new commits. Load them now?'):format(st.number), '&Yes\n&No', 1) ~= 1 then return end
+      M.command({ fargs = { 'open', ('https://%s/%s/%s/pull/%d'):format(st.host, st.owner, st.name, st.number) } })
+    end)
+  end
 end
 
 local function writable()
@@ -282,6 +290,31 @@ end
 local function post(ctx, body)
   writable()
   return S.backend.post(S, ctx, body)
+end
+
+-- A new comment started before you reopened its PR at new commits: its line is in the version you saw then. Finds
+-- that code in the new version and asks to post the comment there; raises if it can't, so your text stays open.
+local function move_to_new_commits(ctx)
+  local a, from = ctx.anchor, ctx.review
+  local function cannot(why)
+    error(('PR #%d has new commits since you started this comment, and %s: copy your text, :q!, and comment again')
+      :format(S.number, why), 0)
+  end
+  local line = a.line
+  if a.side == 'RIGHT' then
+    line = store.relocate(store.read_lines(S.dir .. '/' .. a.path) or {}, ctx.code, a.line)
+    if not line then cannot('they changed the code you commented on') end
+  elseif from.base ~= S.base then -- a comment on removed lines: they're in the base, which moved too
+    cannot('its base changed')
+  end
+  local first = line - (a.line - (a.startLine or a.line))
+  local file = S.by_path[a.path]
+  local h = file and diff.hunk_of(file, first, a.side)
+  if not h or h ~= diff.hunk_of(file, line, a.side) then cannot("that code isn't among its changes any more") end
+  local where = first == line and ('line %d'):format(line) or ('lines %d-%d'):format(first, line)
+  local ask = ('PR #%d has new commits since you started this comment. Post it on %s, where that code is now?'):format(S.number, where)
+  if vim.fn.confirm(ask, '&Yes\n&No', 1) ~= 1 then error('not posted; your comment is still open', 0) end
+  a.line, a.startLine, ctx.review = line, a.startLine and first, S
 end
 
 local function save(buf, ctx)
@@ -297,9 +330,7 @@ local function save(buf, ctx)
     error(('this comment is for %s, which is no longer open: reopen it to save this comment, or :q! to drop it')
       :format(from.title), 0)
   end
-  if ctx.anchor and from.head ~= S.head then -- its line number is in the PR as it was
-    error("the PR has new commits since you started this comment, so its line may have moved: copy your text, :q!, and comment again", 0)
-  end
+  if ctx.anchor and not ctx.comment and from.head ~= S.head then move_to_new_commits(ctx) end
   local reopens = post(ctx, body)
   if vim.api.nvim_buf_is_valid(buf) then vim.bo[buf].modified = false end
   refresh()

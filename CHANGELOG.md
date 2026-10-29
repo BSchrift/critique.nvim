@@ -6,6 +6,17 @@ lazy.nvim, `version = '*'` follows them.
 
 ## [Unreleased]
 
+### Added
+
+- When someone pushes to a PR while you review it, critique notices on your next save (or
+  `:Critique refresh`) and asks once whether to load the new commits.
+
+### Changed
+
+- A new comment you started before reopening a PR at new commits asks to go where its code is now ("Post it
+  on line 42, where that code is now?"), instead of being refused. If the new commits changed that code,
+  it's still refused, and your text stays open.
+
 ## [0.9.0] - 2026-10-29
 
 ### Changed

@@ -147,6 +147,10 @@ Then:
 7. **Come back.** When the PR has new commits since your review, critique says so when you open it.
    See [Coming back to a review](#coming-back-to-a-review).
 
+If someone pushes while you review, critique notices on your next save (or `:Critique refresh`) and
+asks once whether to load the new commits. A comment you started before loading them asks to go
+where its code is now; if the new commits changed that code, it stays open for you to copy.
+
 Until you submit, your comments are a pending review: they're saved on GitHub but only you can see them.
 If you quit halfway, run `critique <url>` again and continue where you left off.
 
