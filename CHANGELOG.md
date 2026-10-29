@@ -6,6 +6,12 @@ lazy.nvim, `version = '*'` follows them.
 
 ## [Unreleased]
 
+### Changed
+
+- A save from a timer (most auto-save plugins, or a mapping that saves with `vim.schedule`) still leaves
+  your edits alone in a review, but now says so, once: "ignored a save of … from a timer or plugin". It
+  used to do nothing without a word. The README and `:help critique` explain it.
+
 ### Fixed
 
 - A comment you started before reopening the same PR or review couldn't be saved: `:w` said its review was

@@ -330,6 +330,12 @@ The suggestion window pops up while I type ~
     An auto-save plugin saves on every change. Turn off auto_suggest and use
     |:Critique-suggest|.
 
+"ignored a save ... from a timer or plugin" ~
+    A timer saved the file: most auto-save plugins do, and so does a mapping
+    that saves later (|vim.schedule()|, |vim.defer_fn()|). Only saves you
+    make offer suggestions, so your edits stay unsaved. Type `:w`, or use
+    |:Critique-suggest|. With auto_suggest off, such saves write the file.
+
 "nothing to compare yet" / "can't fetch" from :Critique since ~
     Local review: it compares with your last `:Critique submit`; submit once
     first. GitHub: your last review's commit was force-pushed away.
@@ -442,10 +448,10 @@ file.
 Auto-save plugins ~
 critique asks only about saves you make (`:w`, a mapping, `:wq`) and leaves
 your edits alone when a timer saves them, which is how most auto-save
-plugins work. Plugins that save on an event (|InsertLeave|, |TextChanged|)
-look like you to critique, so the window pops up, and some of them write the
-file directly, which critique can't stop. If you use one, turn auto_suggest
-off and use |:Critique-suggest|.
+plugins work; it says so the first time. Plugins that save on an event
+(|InsertLeave|, |TextChanged|) look like you to critique, so the window pops
+up, and some of them write the file directly, which critique can't stop. If
+you use one, turn auto_suggest off and use |:Critique-suggest|.
 
 ==============================================================================
 12. Configuration                                            *critique-config*

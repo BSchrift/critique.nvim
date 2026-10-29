@@ -654,6 +654,8 @@ local function suggest(buf)
   vim.api.nvim_create_autocmd('BufLeave', { buffer = fbuf, once = true, callback = function() vim.schedule(function() finish(false) end) end })
 end
 
+local hinted = false -- said once why a save from a timer did nothing
+
 -- With auto_suggest on, :w in a review file asks to post your edits as suggestions instead of writing the file.
 local function on_write(ev)
   local buf, target = ev.buf, vim.fn.fnamemodify(ev.file, ':p')
@@ -666,6 +668,10 @@ local function on_write(ev)
     if not ok then error(err, 0) end
   elseif vim.fn.state():find('S') then -- a save you made; an auto-save timer (no S) leaves your edits alone
     vim.schedule(function() suggest(buf) end)
+  elseif not hinted then
+    hinted = true
+    notify(('ignored a save of %s from a timer or plugin (auto-save?), so your edits stay unsaved: in a review, '
+      .. 'a :w you type offers them as suggestions, as does :Critique suggest'):format(buf_path(buf)))
   end
 end
 

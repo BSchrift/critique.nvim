@@ -1358,6 +1358,40 @@ H.test(':Critique suggest with no edits says so', function()
   vim.cmd.edit(root .. '/cart/cart.go')
   critique('suggest', 'no edits to suggest in cart/cart.go')
 end)
+H.test('a save from a timer (an auto-save plugin) leaves your edits alone and says why, once; a :w you type asks', function()
+  local root, id = setup()
+  -- A Neovim of its own, idle as when you use one: there, only what you type runs with the 'S' in state().
+  local ch = vim.fn.jobstart({ vim.v.progpath, '--embed', '--headless', '--clean' }, { rpc = true })
+  local function child(code, ...) return vim.rpcrequest(ch, 'nvim_exec_lua', code, { ... }) end
+  local function hints() return child([[return vim.tbl_count(vim.tbl_filter(function(m) return m:find('ignored a save', 1, true) end, _G.msgs))]]) end
+  local ok, err = pcall(function()
+    child([[
+      local plugin, root, id = ...
+      vim.opt.rtp:prepend(plugin)
+      vim.cmd.runtime('plugin/critique.lua')
+      vim.o.swapfile, _G.msgs = false, {}
+      vim.notify = function(m) table.insert(_G.msgs, m) end
+      vim.cmd.cd(root)
+      vim.cmd('Critique open ' .. id)
+    ]], H.plugin, root, id)
+    H.wait_for(function() return child([[return vim.iter(_G.msgs):any(function(m) return m:find(' changed · ', 1, true) end)]]) end, 'the review')
+    child([[
+      vim.cmd.edit('cart/cart.go')
+      vim.api.nvim_buf_set_lines(0, 7, 8, false, { '\treturn b - a' })
+      vim.defer_fn(function() vim.cmd('silent! write') end, 10)
+    ]])
+    H.wait_for(function() return hints() == 1 end, 'the hint')
+    H.has(child('return _G.msgs[#_G.msgs]'), 'ignored a save of cart/cart.go from a timer or plugin (auto-save?)')
+    child([[vim.cmd('silent! write')]]) -- not typed either
+    H.eq({ hints(), child('return vim.bo.modified'), disk(root)[8] }, { 1, true, '\treturn a - b' }, 'said once, and nothing written')
+    child([[vim.api.nvim_feedkeys(':w\r', 't', false)]])
+    H.wait_for(function()
+      return child([[return vim.iter(vim.api.nvim_list_wins()):any(function(w) return vim.api.nvim_win_get_config(w).relative ~= '' end)]])
+    end, 'the suggestion window, for a typed :w')
+  end)
+  vim.fn.jobstop(ch)
+  assert(ok, err)
+end)
 
 H.section(':checkhealth critique')
 H.test('checks Neovim and git, and flags options setup() does not know', function()

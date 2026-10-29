@@ -413,6 +413,7 @@ clipboard provider, it goes to the unnamed register only, so `p` pastes it.
 | `save or undo your edits first` | Comments are placed by line number, so the buffer must match the file. `:w` to post your edits as suggestions, or undo (`u`, `:e!`). |
 | `:w` doesn't save the file | By design: `:w` in a review offers your edits as suggestions. In a local review, `:w!` writes the file. Set `auto_suggest = false` to make `:w` save as usual. |
 | The suggestion window pops up while I type | An auto-save plugin is saving on every change. Set `auto_suggest = false` and use `:Critique suggest`. |
+| `ignored a save … from a timer or plugin` | A timer saved the file: most auto-save plugins do, and so does a mapping that saves later (`vim.schedule`, `vim.defer_fn`). Only saves you make offer suggestions, so your edits stay unsaved. Type `:w`, or use `:Critique suggest`. With `auto_suggest = false`, such saves write the file. |
 | `:Critique since` says "nothing to compare yet" or "can't fetch" | Local: it compares with your last `:Critique submit`, so submit once first. GitHub: your last review's commit was force-pushed away. |
 | critique says your edits were stashed | Edits saved in the PR's checkout were in the way of its new commits. Nothing is lost: run the `git -C … stash pop` from the message to get them back. |
 | LSP errors about missing dependencies | The worktree is a fresh checkout. Install the project's dependencies there as you would for any clone. |
