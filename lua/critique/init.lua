@@ -294,6 +294,7 @@ end
 
 -- A new comment started before you reopened its PR at new commits: its line is in the version you saw then. Finds
 -- that code in the new version and asks to post the comment there; raises if it can't, so your text stays open.
+-- (GitHub puts a new thread on the PR's latest commit, even in a pending review begun on an older one.)
 local function move_to_new_commits(ctx)
   local a, from = ctx.anchor, ctx.review
   local function cannot(why)
