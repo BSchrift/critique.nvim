@@ -284,14 +284,14 @@ function C.unresolve(o) set_resolved(o, false) end
 function C.edit(o)
   local r, log = open_review(o)
   local c = own_comment(r, o.pos[1])
-  store.append(log, { type = 'edit', id = c.id, body = text(o, 2) })
+  store.append(log, { type = 'edit', id = c.id, body = text(o, 2), author = author(o, r), role = 'agent' })
   out('Edited ' .. c.id .. '.')
 end
 
 function C.delete(o)
   local r, log = open_review(o)
   local c = own_comment(r, o.pos[1])
-  store.append(log, { type = 'delete', id = c.id })
+  store.append(log, { type = 'delete', id = c.id, author = author(o, r), role = 'agent' })
   out('Deleted ' .. c.id .. '.')
 end
 

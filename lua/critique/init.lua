@@ -449,7 +449,7 @@ local function post(ctx, body)
   local reopens = S.review and ctx.thread and ctx.thread.isResolved and not ctx.comment -- a new reply on a resolved thread
   if S.review then
     if ctx.comment then
-      store.append(S.log, { type = 'edit', id = ctx.comment.id, body = body })
+      store.append(S.log, { type = 'edit', id = ctx.comment.id, body = body, author = S.me, role = 'human' })
     else
       local ev = { type = 'comment', id = store.new_id(), author = S.me, role = 'human', body = body }
       ev.thread = ctx.thread and ctx.thread.id or ev.id
@@ -953,7 +953,7 @@ function cmds.delete()
   })
   if not c then return end
   if S.review then
-    store.append(S.log, { type = 'delete', id = c.id })
+    store.append(S.log, { type = 'delete', id = c.id, author = S.me, role = 'human' })
   else
     gh.mutate(S.host, 'deletePullRequestReviewComment', { id = c.id })
   end
