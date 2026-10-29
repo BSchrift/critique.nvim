@@ -8,13 +8,22 @@ local function run(cmd)
   return ok and r or { code = -1, stdout = '', stderr = '' }
 end
 
+-- When critique's Lua files last changed. init.lua notes it as it loads; a later change means an update since.
+function M.changed()
+  local last = 0
+  for name in vim.fs.dir(plugin .. '/lua/critique') do
+    local t = (vim.uv.fs_stat(plugin .. '/lua/critique/' .. name) or {}).mtime
+    if t then last = math.max(last, t.sec + t.nsec / 1e9) end
+  end
+  return last
+end
+
 function M.check()
   health.start('critique.nvim')
   local version = vim.trim(run({ 'git', '-C', plugin, 'describe', '--tags', '--always' }).stdout)
   if version ~= '' then health.info('critique.nvim ' .. version) end
   local critique = require('critique')
-  local on_disk = (vim.uv.fs_stat(plugin .. '/lua/critique/init.lua') or {}).mtime
-  if not critique.loaded or (on_disk and (on_disk.sec ~= critique.loaded.sec or on_disk.nsec ~= critique.loaded.nsec)) then
+  if critique.loaded ~= M.changed() then
     health.warn('critique was updated after this Neovim loaded it, so the old version is still running', 'Restart Neovim.')
   end
   if vim.fn.has('nvim-0.11') == 1 then

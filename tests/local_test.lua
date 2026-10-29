@@ -1427,6 +1427,20 @@ H.test('says to restart Neovim when critique was updated after it loaded, instea
   critique.loaded, critique.defaults = loaded, defaults
   assert(ok, err)
 end)
+H.test('an update to any of its files counts, not only init.lua', function()
+  local file = H.plugin .. '/lua/critique/github.lua'
+  local was = vim.uv.fs_stat(file).mtime
+  vim.uv.fs_utime(file, os.time() + 60, os.time() + 60) -- as if `git pull` changed only this file, after loading
+  local ok, err = pcall(function()
+    vim.cmd('checkhealth critique')
+    local function page() return table.concat(vim.api.nvim_buf_get_lines(0, 0, -1, false), '\n') end
+    H.wait_for(function() return page():find('Reviews with AI agents', 1, true) end, 'the checks')
+    H.has(page(), 'old version is still running')
+    vim.cmd('tabclose')
+  end)
+  vim.uv.fs_utime(file, was.sec + was.nsec / 1e9, was.sec + was.nsec / 1e9)
+  assert(ok, err)
+end)
 
 H.section('a comment belongs to its review')
 H.test('a comment saves only into the review it was opened in', function()
