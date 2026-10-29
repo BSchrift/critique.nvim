@@ -1011,6 +1011,25 @@ H.test('a thread the human resolved does not wait on the agent', function()
   H.eq(H.cli(root, { 'wait', '--settle', '0', '--timeout', '2' }).code, 2)
   H.lacks(H.run(root, { 'list' }), 'needs your reply')
 end)
+H.test('wait and watch reload the review only when the log changes', function()
+  local root, id, log = live_setup()
+  human_comment(log, { path = 'README.md', line = 1, code = { '# gone' } }) -- a file that isn't there: each load asks git about renames
+  H.run(root, { 'ack', '1' })
+  local trace = H.tmp .. '/trace-' .. id
+  local function loads() -- each load of the review asks git once
+    local _, n = table.concat(vim.fn.readfile(trace), '\n'):gsub('%-%-name%-status', '')
+    vim.fn.delete(trace)
+    return n
+  end
+  local r = vim.system({ H.bin, 'wait', '-r', id, '--settle', '0', '--timeout', '3' }, { cwd = root, env = { GIT_TRACE = trace } }):wait()
+  H.eq({ r.code, loads() }, { 2, 1 }, 'three seconds of polling, one load')
+  local done = false
+  vim.system({ H.bin, 'watch', '-r', id, '--settle', '0' }, { cwd = root, env = { GIT_TRACE = trace } }, function() done = true end)
+  vim.wait(3000)
+  human(log, { type = 'close' })
+  H.wait_for(function() return done end, 'watch to exit', 10000)
+  H.eq(loads(), 2, 'at the start, and once the review closed')
+end)
 local function watch_output(root, act, settle)
   local out, done = {}, false
   vim.system({ H.bin, 'watch', '--settle', settle or '0' }, { cwd = root, stdout = function(_, d) if d then table.insert(out, d) end end },

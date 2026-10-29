@@ -329,14 +329,25 @@ local function committed(root)
   return function(id) return tracked[('.critique/reviews/' .. id .. '.jsonl'):lower()] == true end
 end
 
+-- Whether a log has a close event, without loading it (which reads every commented file, and may run git).
+-- JSON escapes quotes inside strings, so this text only appears as the event's own type.
+local function closed(log)
+  local f = io.open(log)
+  if not f then return false end
+  local text = f:read('a')
+  f:close()
+  return text:find('"type":"close"', 1, true) ~= nil
+end
+
 -- Open reviews in this repo (all of its worktrees), or only in the checkout at `root` if given.
 function M.list(cwd, root)
   local found = {}
   for _, wt in ipairs(root and { root } or worktrees(cwd)) do
     local is_committed = committed(wt)
     for name, kind in vim.uv.fs_stat(reviews_dir(wt)) and vim.fs.dir(reviews_dir(wt)) or function() end do
-      if kind == 'file' and name:match('%.jsonl$') and not is_committed(name:sub(1, -7)) then
-        local ok, review = pcall(M.load, reviews_dir(wt) .. '/' .. name, 'human')
+      local log = reviews_dir(wt) .. '/' .. name
+      if kind == 'file' and name:match('%.jsonl$') and not is_committed(name:sub(1, -7)) and not closed(log) then
+        local ok, review = pcall(M.load, log, 'human')
         if ok and not review.closed then found[#found + 1] = review end
       end
     end

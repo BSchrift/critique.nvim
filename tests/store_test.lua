@@ -261,6 +261,20 @@ end)
 H.test('list outside a repo is empty', function()
   H.eq(store.list(H.tmp), {})
 end)
+H.test("list doesn't load closed reviews (loading reads every commented file)", function()
+  local root = H.repo()
+  local open = store.start(root, { title = 'open' })
+  local closed = store.start(root, { title = 'closed' })
+  store.append(closed, { type = 'comment', id = 'c-1', thread = 'c-1', body = 'says "type":"close" in a comment', role = 'human' })
+  store.append(closed, { type = 'close', role = 'agent' })
+  store.append(open, { type = 'comment', id = 'c-2', thread = 'c-2', body = 'says "type":"close" too', role = 'human' })
+  local load, loaded = store.load, {}
+  store.load = function(log, ...) table.insert(loaded, log) return load(log, ...) end
+  local ok, found = pcall(store.list, root)
+  store.load = load
+  assert(ok, found)
+  H.eq({ loaded, #found }, { { open }, 1 })
+end)
 
 H.section('diff')
 H.test('covers tracked changes, staged changes, and untracked files', function()

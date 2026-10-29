@@ -128,6 +128,18 @@ local function pause()
   vim.uv.update_time()
 end
 
+-- For polling: whether the log has grown since the last call (it only ever grows). Loading a review reads
+-- every commented file and may run git, too much to do every second for nothing.
+local function grew(log)
+  local size
+  return function()
+    local now = (vim.uv.fs_stat(log) or {}).size
+    if now and now == size then return false end
+    size = now
+    return true
+  end
+end
+
 local function who(c)
   return c.author == c.role and c.author or ('%s (%s)'):format(c.author, c.role)
 end
@@ -321,6 +333,8 @@ end
 
 function C.wait(o)
   local log = review_log(o)
+  local changed = grew(log)
+  changed()
   local r = store.load(log, 'agent')
   if r.closed then return out('The review was closed.') end
   if #r.drafts > 0 then
@@ -333,17 +347,12 @@ function C.wait(o)
   local deadline = vim.uv.now() + (tonumber(o.timeout) or 540) * 1000
   local settle = tonumber(o.settle) or 20
   while true do
-    r = store.load(log, 'agent')
+    if changed() then r = store.load(log, 'agent') end
     if r.closed then return out('The review was closed.') end
-    local ready = r.turn == 'agent'
-    if r.live then
-      -- Live: once a comment needs you and the human has stopped saving for --settle seconds (related comments
-      -- come together). A submit only counts if it's newer than your last action; live replies need no submit.
-      local submitted = r.last_submit and r.last_submit.role == 'human' and r.last_submit.seq > r.agent_last_seq
-      local needed = vim.iter(r.threads):any(function(t) return t.needs_agent end)
-      ready = (submitted or needed) and human_quiet(r) >= settle
-    end
-    if ready then
+    -- Live: the turn is the agent's while something waits on it (see store.load); once the human has stopped
+    -- saving for --settle seconds, so related comments come together.
+    if r.turn == 'agent' and (not r.live or human_quiet(r) >= settle) then
+      r = store.load(log, 'agent') -- the files may have changed since the log did
       print_threads(r, { open = true, json = o.json }, 2)
       if o.json then return end
       local open = #vim.tbl_filter(function(t) return not t.resolved end, r.threads)
@@ -414,6 +423,8 @@ end
 function C.watch(o)
   local log = review_log(o)
   local settle = tonumber(o.settle) or 20
+  local changed = grew(log)
+  changed()
   local printed, since, pending = {}, #store.events(log), {}
   local r = store.load(log, 'agent')
   for _, t in ipairs(r.threads) do
@@ -426,10 +437,12 @@ function C.watch(o)
   end
   io.stdout:setvbuf('line')
   while true do
-    local lines, seen
-    lines, seen, r = human_lines(log, since, printed)
-    since = seen
-    vim.list_extend(pending, lines)
+    if changed() then
+      local lines, seen
+      lines, seen, r = human_lines(log, since, printed)
+      since = seen
+      vim.list_extend(pending, lines)
+    end
     if #pending > 0 and (human_quiet(r) >= settle or r.closed) then
       for _, l in ipairs(pending) do out(l) end
       if not r.closed then out(('(critique list -r %s --open for the code and full comments)'):format(r.id)) end

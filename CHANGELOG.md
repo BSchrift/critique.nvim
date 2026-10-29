@@ -18,6 +18,9 @@ lazy.nvim, `version = '*'` follows them.
   `critique watch` never told the agent you deleted one. Edits and deletes now say who made them.
 - Local reviews: a new file named like an option (`-notes.md`) stopped the review from loading, and each new
   file took its own git call (500 new files: 3 seconds on every refresh). All new files are now one call.
+- `critique` commands got slower as closed reviews piled up (8 seconds with 150 in a big repo), since each
+  one was fully loaded. They're skipped now. `critique wait` and `watch` reload the review only when it
+  changes, instead of every second.
 
 ## [0.8.0] - 2026-10-28
 
