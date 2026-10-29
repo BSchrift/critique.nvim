@@ -150,17 +150,19 @@ H.test('a new file of yours in the way of new commits is stashed too', function(
 end)
 H.test('if the checkout still fails, the error says where your stashed edits went', function()
   H.write(checkout, 'a.txt', { 'mine again' })
-  H.write(checkout, 'd/x.log', { 'ignored' }) -- git won't stash an ignored file, nor delete its folder
-  local exclude = cache .. '/repo.git/info/exclude'
-  H.write(cache .. '/repo.git', 'info/exclude', { '*.log' })
-  H.write(origin, 'd', { 'a file where your folder is' })
-  H.git(origin, 'add', 'd')
   push(origin, 7, { 'one', 'TWO!!', 'three' })
-  local msgs = open()
-  H.has(msgs[#msgs], 'would lose untracked files')
+  -- The retry after the stash fails too. (A real cause, like an ignored file in the way, depends on git's version.)
+  local git_progress, checkouts = gh.git_progress, 0
+  gh.git_progress = function(dir, on_progress, args, stdin)
+    checkouts = checkouts + (args[1] == 'checkout' and 1 or 0)
+    if args[1] == 'checkout' and checkouts == 2 then return false, 'error: the retry failed too' end
+    return git_progress(dir, on_progress, args, stdin)
+  end
+  local ok, msgs = pcall(open)
+  gh.git_progress = git_progress
+  assert(ok, msgs)
+  H.has(msgs[#msgs], 'the retry failed too')
   H.has(msgs[#msgs], "your edits to a.txt in the PR's checkout were in the way of its new commits, so they're stashed")
-  vim.fn.delete(checkout .. '/d', 'rf')
-  vim.fn.delete(exclude)
   H.has(open()[1], '#7 Change two')
 end)
 
