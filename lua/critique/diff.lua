@@ -1,6 +1,6 @@
 -- Parses `git diff` output and draws GitHub-style overlays on buffers.
 local M = {}
-local xdiff = vim.text.diff or vim.diff -- renamed in nvim 0.12
+M.text = vim.text.diff or vim.diff -- vim.diff: deprecated from Neovim 0.12
 
 -- `git diff` as GitHub runs it: 3 lines of context, renames, Myers; user config can't change the hunks.
 M.GIT_ARGS = { '-c', 'core.quotepath=false', '-c', 'diff.suppressBlankEmpty=false', 'diff', '--no-color', '--no-ext-diff',
@@ -28,7 +28,7 @@ function M.word_diff(a, b)
   end
   local oa, ob = offsets(ta), offsets(tb)
   local ra, rb, same = {}, {}, #a + #b
-  local hunks = xdiff(table.concat(ta, '\n') .. '\n', table.concat(tb, '\n') .. '\n', { result_type = 'indices' })
+  local hunks = M.text(table.concat(ta, '\n') .. '\n', table.concat(tb, '\n') .. '\n', { result_type = 'indices' })
   for _, h in ipairs(hunks) do
     local sa, ca, sb, cb = unpack(h)
     if ca > 0 then

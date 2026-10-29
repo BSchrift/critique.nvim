@@ -19,7 +19,7 @@ and a reply that ends with what you skipped and any risk.
 
 - Read the code the change touches, and grep every caller. `lua/critique/init.lua` is shared by GitHub
   reviews and local (agent) reviews: a change there usually affects both.
-- Supported: Neovim 0.11 and newer. Use 0.12-only APIs only with a fallback (see `diff_text` in init.lua).
+- Supported: Neovim 0.11 and newer. Use 0.12-only APIs only with a fallback (see `M.text` in diff.lua).
 - Async code runs in coroutines (`gh.async` / `gh.await` / `gh.all` / `gh.wait` in `lua/critique/gh.lua`).
   Never wrap a call that can yield in `pcall`: it fails on PUC Lua builds of Neovim.
 - critique's PR checkouts are partial, history-free clones. Never run git commands there that look up

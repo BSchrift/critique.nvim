@@ -71,6 +71,11 @@ local function buf_path(buf)
   if name:sub(1, #prefix) == prefix then return name:sub(#prefix + 1), 'RIGHT' end
 end
 
+-- The buffer that shows one side of a file: its base version (LEFT), or the file in the checkout (RIGHT).
+local function file_name(path, side)
+  return side == 'LEFT' and 'critique://base/' .. path or S.dir .. '/' .. path
+end
+
 -- Line where thread t shows in buf, or nil. LEFT threads also show in the head, next to their deleted lines.
 local function thread_line(buf, t, path, side)
   if t.path ~= path or not t.line then return end -- outdated threads have no line
@@ -239,7 +244,7 @@ local function thread_items()
       open, waiting = open + (t.isResolved and 0 or 1), waiting + (needs and 1 or 0)
       local base = t.diffSide == 'LEFT' or (S.by_path[t.path] or {}).status == 'D'
       table.insert(items, {
-        filename = (base and 'critique://base/' or S.dir .. '/') .. t.path,
+        filename = file_name(t.path, base and 'LEFT' or 'RIGHT'),
         lnum = t.line,
         text = (t.isResolved and '✓ ' or '') .. thread_summary(t)
           .. (t.isResolved and ' · resolved' or needs and ' · needs your reply' or is_pending(t) and ' · pending' or ''),
@@ -259,7 +264,7 @@ local function set_qf(reset)
     items = vim.tbl_map(function(f)
       local side, lnum = first_change(f)
       return {
-        filename = side == 'LEFT' and 'critique://base/' .. f.path or S.dir .. '/' .. f.path,
+        filename = file_name(f.path, side),
         lnum = lnum,
         text = (({ viewed = '✓ ', changed = '● ' })[S.viewed[f.path]] or '') .. ('%s  +%d -%d'):format(f.status, f.adds, f.dels),
       }
@@ -273,7 +278,7 @@ local function set_qf(reset)
       end
     end
     for _, e in pairs(extra) do
-      table.insert(items, { filename = e.filename, lnum = e.lnum, text = ('%d thread%s'):format(e.count, e.count == 1 and '' or 's') })
+      table.insert(items, { filename = e.filename, lnum = e.lnum, text = plural(e.count, 'thread') })
     end
     local n, total = viewed_count()
     title = S.title .. (S.since and ' · since your last review' or '') .. (n > 0 and (' · %d/%d viewed'):format(n, total) or '')
@@ -404,8 +409,6 @@ local function edit(ctx)
   vim.api.nvim_create_autocmd('BufWriteCmd', { buffer = buf, callback = function() gh.wait(function() save(buf, ctx) end) end })
 end
 
-local diff_text = vim.text and vim.text.diff or vim.diff -- vim.diff is deprecated from Neovim 0.12
-
 -- Your unsaved edits in a review file, one per changed block, each as a suggestion on lines of the file on disk.
 -- An insertion goes with the line above it (or below, at the top): GitHub anchors suggestions on existing lines.
 local function edits(buf, path)
@@ -428,7 +431,7 @@ local function edits(buf, path)
     local h1 = file and diff.hunk_of(file, e.first, 'RIGHT')
     e.ok = #old > 0 and (S.review ~= nil or (h1 ~= nil and h1 == diff.hunk_of(file, e.last, 'RIGHT')))
     return e
-  end, diff_text(table.concat(old, '\n') .. '\n', table.concat(new, '\n') .. '\n', { result_type = 'indices' }))
+  end, diff.text(table.concat(old, '\n') .. '\n', table.concat(new, '\n') .. '\n', { result_type = 'indices' }))
 end
 
 local function suggestion_body(lines)
@@ -566,12 +569,12 @@ local function swap(to)
   if side == to then return end
   local file, lnum = S.by_path[path], vim.fn.line('.')
   if file then lnum = diff.map_line(file, lnum, side == 'RIGHT' and 'new' or 'old', to == 'RIGHT' and 'new' or 'old') end
-  vim.cmd.edit(vim.fn.fnameescape(to == 'LEFT' and 'critique://base/' .. path or S.dir .. '/' .. path))
+  vim.cmd.edit(vim.fn.fnameescape(file_name(path, to)))
   pcall(vim.api.nvim_win_set_cursor, 0, { lnum, 0 })
 end
 
 local function show(path, side, line)
-  vim.cmd.edit(vim.fn.fnameescape(side == 'LEFT' and 'critique://base/' .. path or S.dir .. '/' .. path))
+  vim.cmd.edit(vim.fn.fnameescape(file_name(path, side)))
   pcall(vim.api.nvim_win_set_cursor, 0, { line, 0 })
   vim.cmd('normal! zz')
 end
