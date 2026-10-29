@@ -11,6 +11,9 @@ lazy.nvim, `version = '*'` follows them.
 - A comment you started before reopening the same PR or review couldn't be saved: `:w` said its review was
   no longer open. It saves now. A new comment on a PR that got new commits meanwhile is refused instead,
   since its line may have moved.
+- After `y` on a suggestion, typing while it posted could overwrite a line, leave the suggested text in the
+  file (so the next `:w` posted it again), and mark the file saved. critique now waits for the post
+  (usually under a second), as comment saves do.
 
 ## [0.8.0] - 2026-10-28
 

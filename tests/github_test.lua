@@ -363,4 +363,25 @@ H.test('a new comment started before the PR got new commits is refused, since it
   H.has(refused_write(), 'the PR has new commits since you started this comment')
 end)
 
+H.section('suggestions')
+local function float_open()
+  return vim.iter(vim.api.nvim_list_wins()):any(function(w) return vim.api.nvim_win_get_config(w).relative ~= '' end)
+end
+H.test('y posts before you can type again: the file is back as it was, and a second :w has nothing to post', function()
+  open()
+  on_line('a.txt', 3)
+  local disk = vim.api.nvim_buf_get_lines(0, 0, -1, false)
+  vim.api.nvim_buf_set_lines(0, 2, 3, false, { 'TWO?' })
+  local count = #sent
+  vim.cmd('write')
+  H.wait_for(float_open, 'the suggestion window')
+  vim.api.nvim_feedkeys('y', 'x', false)
+  H.eq({ vim.api.nvim_buf_get_lines(0, 0, -1, false), vim.bo.modified }, { disk, false }, 'posted and put back already')
+  local before = #messages
+  vim.cmd('write')
+  H.wait_for(function() return #messages > before end, 'the second :w')
+  H.has(messages[#messages].msg, 'no edits to suggest in a.txt')
+  H.eq(vim.tbl_map(function(m) return m[1] end, vim.list_slice(sent, count + 1)), { 'addPullRequestReview', 'addPullRequestReviewThread' })
+end)
+
 H.done()

@@ -631,7 +631,8 @@ local function suggest(buf)
     if not asking then return end
     asking = false
     pcall(vim.api.nvim_win_close, win, true)
-    if yes and ok > 0 then gh.async(post_suggestions)(buf, path, list) end
+    -- Wait for the post, as comment saves do: typing meanwhile would move the lines it then puts back.
+    if yes and ok > 0 then gh.wait(function() post_suggestions(buf, path, list) end) end
     local nxt = table.remove(waiting, 1)
     if nxt and vim.api.nvim_buf_is_valid(nxt) then vim.schedule(function() suggest(nxt) end) end
   end
