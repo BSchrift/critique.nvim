@@ -141,7 +141,7 @@ a submit, and your replies and resolves reach them right away.
 | `critique comment -r <id> <path>:<line>[-<end>] [--old] '<text>'` | New thread |
 | `critique reply -r <id> <n> '<text>'` | Reply in a thread |
 | `critique resolve -r <id> <n>` / `unresolve` | Resolve or reopen a thread |
-| `critique edit -r <id> <comment-id> '<text>'` / `delete` | Change or delete your own comment (ids like `c-a35698` are in `list`) |
+| `critique edit -r <id> <comment-id> '<text>'` / `delete` | Change or delete your own comment (ids like `c-a35698f2c1` are in `list`) |
 | `critique submit -r <id> [--summary T]` | End your turn |
 | `critique wait -r <id> [--timeout S] [--settle S]` | Block until the user submits (live: until a comment needs you); exit 2 on timeout |
 | `critique watch -r <id> [--settle S]` | Stream the user's new comments as they arrive, until the review closes |

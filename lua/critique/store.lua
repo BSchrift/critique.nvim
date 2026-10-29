@@ -53,8 +53,10 @@ function M.append(log, ev)
   return ev
 end
 
+-- 40 random bits: two comments in a review sharing an id would edit or delete each other. (Logs from before
+-- this have 24-bit ids, which still work: an id is only ever compared whole.)
 function M.new_id()
-  return 'c-' .. rand(3)
+  return 'c-' .. rand(5)
 end
 
 -- Where a block of code (ending at `line`) is now, or nil if it is gone: same place, else the nearest exact match.

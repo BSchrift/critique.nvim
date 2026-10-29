@@ -21,6 +21,8 @@ lazy.nvim, `version = '*'` follows them.
 - `critique` commands got slower as closed reviews piled up (8 seconds with 150 in a big repo), since each
   one was fully loaded. They're skipped now. `critique wait` and `watch` reload the review only when it
   changes, instead of every second.
+- Comment ids in local reviews were short enough to collide (about a 3% chance in a review with 1,000
+  comments), and then deleting one comment could delete another. New ids are longer (`c-a35698f2c1`).
 
 ## [0.8.0] - 2026-10-28
 

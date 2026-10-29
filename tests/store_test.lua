@@ -107,6 +107,14 @@ local function comment(log, fields)
   return id
 end
 
+H.test('comment ids have 40 random bits, and the 24-bit ids of older logs still work', function()
+  H.ok(store.new_id():match('^c%-%x%x%x%x%x%x%x%x%x%x$'), store.new_id())
+  local _, log = new_review()
+  store.append(log, { type = 'comment', id = 'c-a35698', thread = 'c-a35698', author = 'a', role = 'agent',
+    path = 'f.txt', side = 'new', line = 2, code = { 'two' }, body = 'old' })
+  store.append(log, { type = 'edit', id = 'c-a35698', body = 'edited' })
+  H.eq(store.load(log, 'agent').threads[1].comments[1].body, 'edited')
+end)
 H.test('threads are numbered in order and replies attach to them', function()
   local _, log = new_review()
   local t1 = comment(log, { body = 'first' })

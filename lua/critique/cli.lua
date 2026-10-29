@@ -219,7 +219,7 @@ local function own_comment(r, id)
       if c.id == id then return c.role == 'agent' and c or error('you can only change your own comments', 0) end
     end
   end
-  error(('no comment %s; edit and delete take a comment id like c-a35698 (shown in critique list)'):format(id), 0)
+  error(('no comment %s; edit and delete take a comment id like c-a35698f2c1 (shown in critique list)'):format(id), 0)
 end
 
 local C = {}
