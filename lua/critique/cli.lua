@@ -128,6 +128,18 @@ local function pause()
   vim.uv.update_time()
 end
 
+-- For polling: whether the log has grown since the last call (it only ever grows). Loading a review reads
+-- every commented file and may run git, too much to do every second for nothing.
+local function grew(log)
+  local size
+  return function()
+    local now = (vim.uv.fs_stat(log) or {}).size
+    if now and now == size then return false end
+    size = now
+    return true
+  end
+end
+
 local function who(c)
   return c.author == c.role and c.author or ('%s (%s)'):format(c.author, c.role)
 end
@@ -207,7 +219,7 @@ local function own_comment(r, id)
       if c.id == id then return c.role == 'agent' and c or error('you can only change your own comments', 0) end
     end
   end
-  error(('no comment %s; edit and delete take a comment id like c-a35698 (shown in critique list)'):format(id), 0)
+  error(('no comment %s; edit and delete take a comment id like c-a35698f2c1 (shown in critique list)'):format(id), 0)
 end
 
 local C = {}
@@ -257,12 +269,27 @@ function C.comment(o)
     or error(('%s does not exist in the %s version'):format(path, side == 'old' and 'base' or 'current'), 0)
   l1, l2 = tonumber(l1), tonumber(l2 ~= '' and l2 or l1)
   if l1 < 1 or l2 < l1 or l2 > #lines then error(('lines %d-%d are outside %s (1-%d)'):format(l1, l2, path, #lines), 0) end
-  local id = store.new_id()
+  local id, code = store.new_id(), vim.list_slice(lines, l1, l2)
+  local before, after -- only threads on the current version move with the code
+  if side == 'new' then before, after = store.context(lines, code, l2) end
   store.append(log, { type = 'comment', id = id, thread = id, author = author(o, r), role = 'agent', path = path, side = side,
-    line = l2, start_line = l1 < l2 and l1 or nil, code = vim.list_slice(lines, l1, l2), body = text(o, 2) })
+    line = l2, start_line = l1 < l2 and l1 or nil, code = code, before = before, after = after, body = text(o, 2) })
   for _, t in ipairs(store.load(log, 'agent').threads) do
     if t.id == id then out(('Created #%d on %s:%s.'):format(t.n, path, l1 < l2 and (l1 .. '-' .. l2) or l1)) end
   end
+end
+
+-- The human's comments on thread t that you haven't read (see store.unread), one per line.
+local function unread_lines(t)
+  return table.concat(vim.tbl_map(function(c)
+    return ('  %s [%s]: %s'):format(who(c), c.id, (c.body:gsub('\n', '\n      ')))
+  end, store.unread(t)), '\n')
+end
+
+-- What the human added to t after your ack, which your reply or resolve can't have taken into account.
+local function after_ack(r, t)
+  return ('the human wrote on #%d after your ack:\n%s\nNext: critique ack -r %s %d (it marks this read), then reply or resolve.')
+    :format(t.n, unread_lines(t), r.id, t.n)
 end
 
 function C.reply(o)
@@ -270,11 +297,14 @@ function C.reply(o)
   local t = thread(r, o.pos[1])
   store.append(log, { type = 'comment', id = store.new_id(), thread = t.id, author = author(o, r), role = 'agent', body = text(o, 2) })
   out(('Replied on #%d.'):format(t.n))
+  t = thread(store.load(log, 'agent'), o.pos[1])
+  if t.seen_by_ack and #store.unread(t) > 0 then out('Note: ' .. after_ack(r, t)) end
 end
 
 local function set_resolved(o, resolved)
   local r, log = open_review(o)
   local t = thread(r, o.pos[1])
+  if resolved and t.seen_by_ack and #store.unread(t) > 0 then error(after_ack(r, t), 0) end
   store.append(log, { type = 'resolve', thread = t.id, resolved = resolved, author = author(o, r), role = 'agent' })
   out(('%s #%d.'):format(resolved and 'Resolved' or 'Reopened', t.n))
 end
@@ -284,14 +314,14 @@ function C.unresolve(o) set_resolved(o, false) end
 function C.edit(o)
   local r, log = open_review(o)
   local c = own_comment(r, o.pos[1])
-  store.append(log, { type = 'edit', id = c.id, body = text(o, 2) })
+  store.append(log, { type = 'edit', id = c.id, body = text(o, 2), author = author(o, r), role = 'agent' })
   out('Edited ' .. c.id .. '.')
 end
 
 function C.delete(o)
   local r, log = open_review(o)
   local c = own_comment(r, o.pos[1])
-  store.append(log, { type = 'delete', id = c.id })
+  store.append(log, { type = 'delete', id = c.id, author = author(o, r), role = 'agent' })
   out('Deleted ' .. c.id .. '.')
 end
 
@@ -305,6 +335,8 @@ end
 
 function C.wait(o)
   local log = review_log(o)
+  local changed = grew(log)
+  changed()
   local r = store.load(log, 'agent')
   if r.closed then return out('The review was closed.') end
   if #r.drafts > 0 then
@@ -317,17 +349,12 @@ function C.wait(o)
   local deadline = vim.uv.now() + (tonumber(o.timeout) or 540) * 1000
   local settle = tonumber(o.settle) or 20
   while true do
-    r = store.load(log, 'agent')
+    if changed() then r = store.load(log, 'agent') end
     if r.closed then return out('The review was closed.') end
-    local ready = r.turn == 'agent'
-    if r.live then
-      -- Live: once a comment needs you and the human has stopped saving for --settle seconds (related comments
-      -- come together). A submit only counts if it's newer than your last action; live replies need no submit.
-      local submitted = r.last_submit and r.last_submit.role == 'human' and r.last_submit.seq > r.agent_last_seq
-      local needed = vim.iter(r.threads):any(function(t) return t.needs_agent end)
-      ready = (submitted or needed) and human_quiet(r) >= settle
-    end
-    if ready then
+    -- Live: the turn is the agent's while something waits on it (see store.load); once the human has stopped
+    -- saving for --settle seconds, so related comments come together.
+    if r.turn == 'agent' and (not r.live or human_quiet(r) >= settle) then
+      r = store.load(log, 'agent') -- the files may have changed since the log did
       print_threads(r, { open = true, json = o.json }, 2)
       if o.json then return end
       local open = #vim.tbl_filter(function(t) return not t.resolved end, r.threads)
@@ -351,6 +378,8 @@ function C.ack(o)
   local t = thread(r, o.pos[1])
   store.append(log, { type = 'ack', thread = t.id, author = author(o, r), role = 'agent' })
   out(("Marked #%d: you're on it. Reply or resolve when done."):format(t.n))
+  -- An ack marks the thread read, so show what it covers: the human may have added to it since you last looked.
+  if #store.unread(t) > 0 then out('It covers:\n' .. unread_lines(t)) end
 end
 
 -- The human's events after `since`, as one line each, once they are visible to the agent (drafts are not).
@@ -396,21 +425,26 @@ end
 function C.watch(o)
   local log = review_log(o)
   local settle = tonumber(o.settle) or 20
+  local changed = grew(log)
+  changed()
   local printed, since, pending = {}, #store.events(log), {}
   local r = store.load(log, 'agent')
   for _, t in ipairs(r.threads) do
     for _, c in ipairs(t.comments) do printed[c.id] = true end
     if t.needs_agent then
-      local c = t.comments[#t.comments]
+      local unread = store.unread(t)
+      local c = unread[#unread] or t.comments[#t.comments]
       table.insert(pending, ('#%d waiting · %s:%s · %s: %s'):format(t.n, t.path, t.line or t.orig_line, c.author, (c.body:match('^[^\r\n]*'))))
     end
   end
   io.stdout:setvbuf('line')
   while true do
-    local lines, seen
-    lines, seen, r = human_lines(log, since, printed)
-    since = seen
-    vim.list_extend(pending, lines)
+    if changed() then
+      local lines, seen
+      lines, seen, r = human_lines(log, since, printed)
+      since = seen
+      vim.list_extend(pending, lines)
+    end
     if #pending > 0 and (human_quiet(r) >= settle or r.closed) then
       for _, l in ipairs(pending) do out(l) end
       if not r.closed then out(('(critique list -r %s --open for the code and full comments)'):format(r.id)) end

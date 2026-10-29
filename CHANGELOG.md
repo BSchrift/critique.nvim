@@ -19,6 +19,29 @@ lazy.nvim, `version = '*'` follows them.
 
 ### Fixed
 
+- Security: a review log committed to a repo could still reach your agent: in another capitalisation
+  (`.critique/Reviews/`, the same folder on macOS), or behind a symlinked `.critique` or `reviews` folder.
+  Those are ignored now too.
+- Live reviews: a comment you added to a thread, or an edit you made, after the agent started on it (its
+  `ack`) was lost if the agent then replied and resolved. The thread now still needs the agent: its `reply`
+  prints what you added, `resolve` refuses until it has read it, and `ack` prints the comments it covers.
+- Live reviews: editing a comment in Neovim didn't hold the agent back while you were still typing, and
+  `critique watch` never told the agent you deleted one. Edits and deletes now say who made them.
+- Local reviews: a new file named like an option (`-notes.md`) stopped the review from loading, and each new
+  file took its own git call (500 new files: 3 seconds on every refresh). All new files are now one call.
+- `critique` commands got slower as closed reviews piled up (8 seconds with 150 in a big repo), since each
+  one was fully loaded. They're skipped now. `critique wait` and `watch` reload the review only when it
+  changes, instead of every second.
+- Comment ids in local reviews were short enough to collide (about a 3% chance in a review with 1,000
+  comments), and then deleting one comment could delete another. New ids are longer (`c-a35698f2c1`).
+- In local reviews, a thread on a line that appears more than once (`return err`) could jump to another copy
+  of it when code was added above. New threads remember the lines around them and stay on their own copy;
+  when it can't tell the copies apart, the thread shows as outdated instead of on the wrong line.
+- A local review write that was cut short (a full disk, a crash) made the whole review unreadable, and
+  the next comment was lost with it. The broken line is skipped now, and the next write starts a new line.
+- Two repos could have reviews with the same id, and then `-r <id>` (or `critique <id>`) could open the
+  other repo's review. New ids are unique across your repos, and an id two repos already share opens the
+  review in the repo you're in.
 - A comment you started before reopening the same PR or review couldn't be saved: `:w` said its review was
   no longer open. It saves now. A new comment on a PR that got new commits meanwhile is refused instead,
   since its line may have moved.

@@ -204,6 +204,8 @@ agent when you save it, and it gets to work right away:
 - It starts once you've stopped saving comments for about 20 seconds, so related comments arrive together
   and it doesn't act on one you're about to edit. Until then the thread shows `· sent`.
 - The thread it's working on shows `⏳ claude is on it`, and Neovim tells you when it replies or resolves.
+  Add to the thread or edit your comment after that, and it reaches the agent too: the agent can't
+  resolve the thread until it has read what you added.
 - Replying to a resolved thread reopens it (even a "thanks", so the agent takes another look).
   `:Critique submit` is optional; use it to say "that's all for now".
 

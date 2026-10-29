@@ -231,6 +231,8 @@ H.test('reopening your pending comment edits it', function()
   H.eq(vim.api.nvim_buf_get_lines(0, -2, -1, false), { 'v1' }, 'pending comment is editable below the ▼ line')
   write_comment('v2')
   H.eq(vim.tbl_map(function(c) return c.body end, store.load(log, 'human').threads[1].comments), { 'v2' })
+  local events = store.events(log) -- marked as yours: a live agent waits until you stop editing
+  H.eq({ events[#events].type, events[#events].role, events[#events].author }, { 'edit', 'human', 'Tester' })
 end)
 H.test('in the before view, comments go on the base version', function()
   local _, id, log = setup()
@@ -354,6 +356,19 @@ H.test('threads move with the code when the agent edits around them', function()
   critique('refresh')
   H.eq(vim.tbl_map(function(t) return t[1] end, thread_texts()), { 9 })
 end)
+H.test('your thread on a repeated line stays on its own copy when the agent adds code above it', function()
+  local root, id, log = setup()
+  local both = { 'func A() error {', '\terr := a()', '\treturn err', '}', 'func B() error {', '\terr := b()', '\treturn err', '}' }
+  H.write(root, 'f.go', both)
+  open(id)
+  vim.cmd.edit(root .. '/f.go')
+  goto_line(7)
+  critique('comment')
+  write_comment("B's error needs context")
+  for _ = 1, 4 do table.insert(both, 5, '') end -- A's copy is now as near to line 7 as B's
+  H.write(root, 'f.go', both)
+  H.eq(store.load(log, 'human').threads[1].line, 11)
+end)
 H.test('resolve and unresolve a thread', function()
   local root, id, log = setup()
   H.run(root, { 'comment', 'cart/cart.go:4', 'x', '--as', 'claude' })
@@ -380,6 +395,8 @@ H.test('delete one of your comments', function()
   assert(ok, err)
   H.eq(#store.load(log, 'human').threads, 0)
   H.eq(thread_texts(), {})
+  local events = store.events(log) -- marked as yours: `critique watch` tells the agent
+  H.eq({ events[#events].type, events[#events].role, events[#events].author }, { 'delete', 'human', 'Tester' })
 end)
 H.test("you can't delete the agent's comments", function()
   local root, id = setup()
@@ -938,10 +955,10 @@ H.test("the agent's ack, reply, and resolve show up as they happen", function()
   before = #messages
   H.run(root, { 'reply', '1', 'Removed it.' })
   H.run(root, { 'resolve', '1' })
+  -- One notification, "claude replied on #1, resolved #1", if both land within its 300 ms debounce; else two.
   H.wait_for(function()
-    for i = before + 1, #messages do
-      if messages[i].msg:find('claude replied on #1, resolved #1', 1, true) then return true end
-    end
+    local said = table.concat(vim.tbl_map(function(m) return m.msg end, vim.list_slice(messages, before + 1)), '\n')
+    return said:find('claude replied on #1', 1, true) and said:find('resolved #1', 1, true)
   end, 'the reply/resolve notification')
   H.lacks(thread_texts()[1][2], '⏳')
   H.has(thread_texts()[1][2], '✓ #1 (2)')
@@ -1404,7 +1421,9 @@ H.test('checks Neovim and git, and flags options setup() does not know', functio
     H.has(text, 'OK Neovim ' .. tostring(vim.version()))
     H.has(text, 'OK git ')
     H.has(text, 'unknown option "autosuggest" in setup()')
-    H.ok(text:find('\n%- critique%.nvim %S+'), 'the version (a tag, or the commit in a checkout without tags)')
+    if vim.uv.fs_stat(H.plugin .. '/.git') then -- a release tarball has no version to show
+      H.ok(text:find('\n%- critique%.nvim %S+'), 'the version (a tag, or the commit in a checkout without tags)')
+    end
     H.lacks(text, 'Failed to run healthcheck')
     H.lacks(text, 'old version is still running')
     vim.cmd('tabclose')

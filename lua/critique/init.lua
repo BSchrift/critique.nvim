@@ -335,13 +335,14 @@ local function post(ctx, body)
   local reopens = S.review and ctx.thread and ctx.thread.isResolved and not ctx.comment -- a new reply on a resolved thread
   if S.review then
     if ctx.comment then
-      store.append(S.log, { type = 'edit', id = ctx.comment.id, body = body })
+      store.append(S.log, { type = 'edit', id = ctx.comment.id, body = body, author = S.me, role = 'human' })
     else
       local ev = { type = 'comment', id = store.new_id(), author = S.me, role = 'human', body = body }
       ev.thread = ctx.thread and ctx.thread.id or ev.id
       if not ctx.thread then
         local a = ctx.anchor
         ev.path, ev.side, ev.line, ev.start_line, ev.code = a.path, a.side == 'LEFT' and 'old' or 'new', a.line, a.startLine, ctx.code
+        if ev.side == 'new' then ev.before, ev.after = store.context(store.file_lines(S.review, ev.path, 'new') or {}, ev.code, ev.line) end
       end
       store.append(S.log, ev)
       ctx.comment = { id = ev.id }
@@ -780,7 +781,7 @@ function cmds.delete()
   })
   if not c then return end
   if S.review then
-    store.append(S.log, { type = 'delete', id = c.id })
+    store.append(S.log, { type = 'delete', id = c.id, author = S.me, role = 'human' })
   else
     github.delete(S, c)
   end

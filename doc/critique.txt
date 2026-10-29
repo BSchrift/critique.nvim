@@ -390,6 +390,8 @@ it writes them. The agent starts once you've stopped saving comments for
 about 20 seconds (its `--settle`), so related comments arrive together;
 until then the thread shows `· sent`. When it starts on a thread it runs
 `critique ack`, and the thread shows `⏳ <agent> is on it` until it replies.
+If you add to the thread or edit your comment after that, it reaches the
+agent too: the agent can't resolve the thread until it has read it.
 Neovim tells you what it did: "claude replied on #2, resolved #2". Replying
 to a resolved thread reopens it. `:Critique submit` is optional and says
 "that's all for now".

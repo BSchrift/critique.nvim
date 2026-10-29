@@ -46,19 +46,34 @@ end
 function M.append(log, ev)
   ev.at = os.date('!%Y-%m-%dT%H:%M:%SZ')
   local line = vim.json.encode(ev) .. '\n'
-  local fd = assert(vim.uv.fs_open(log, 'a', 420))
+  local fd = assert(vim.uv.fs_open(log, 'a+', 420))
+  -- After a write that was cut short, start a fresh line, so this event isn't lost with it.
+  local size = vim.uv.fs_fstat(fd).size
+  if size > 0 and vim.uv.fs_read(fd, 1, size - 1) ~= '\n' then line = '\n' .. line end
   local written, err = vim.uv.fs_write(fd, line)
   vim.uv.fs_close(fd)
   if written ~= #line then error(('could not save to %s: %s'):format(log, err or 'disk full?'), 0) end
   return ev
 end
 
+-- 40 random bits: two comments in a review sharing an id would edit or delete each other. (Logs from before
+-- this have 24-bit ids, which still work: an id is only ever compared whole.)
 function M.new_id()
-  return 'c-' .. rand(3)
+  return 'c-' .. rand(5)
 end
 
--- Where a block of code (ending at `line`) is now, or nil if it is gone: same place, else the nearest exact match.
-function M.relocate(lines, code, line)
+-- The lines just above and below a block of code (ending at `last`), saved with a thread so that relocate can
+-- tell copies of the block apart. Nothing if `lines` doesn't have the block there.
+function M.context(lines, code, last)
+  local first = last - #code + 1
+  if not vim.deep_equal(vim.list_slice(lines, first, last), code) then return end
+  return vim.list_slice(lines, first - 2, first - 1), vim.list_slice(lines, last + 1, last + 2)
+end
+
+-- Where a block of code (ending at `line`) is now, or nil if it is gone. The nearest copy whose surrounding lines
+-- (`before`, `after`, from M.context) still match; else the same place; else the only copy. With several copies
+-- and none of that to go on, nil: better outdated than on the wrong line. (Without context: the nearest copy.)
+function M.relocate(lines, code, line, before, after)
   local n = #code
   local function at(e)
     for i = 1, n do
@@ -66,12 +81,26 @@ function M.relocate(lines, code, line)
     end
     return true
   end
-  if line <= #lines and at(line) then return line end
-  local best
-  for e = n, #lines do
-    if at(e) and (not best or math.abs(e - line) < math.abs(best - line)) then best = e end
+  local function fits(e)
+    for i, l in ipairs(before or {}) do
+      if lines[e - n - #before + i] ~= l then return false end
+    end
+    for i, l in ipairs(after or {}) do
+      if lines[e + i] ~= l then return false end
+    end
+    return true
   end
-  return best
+  local function nearer(e, than) return not than or math.abs(e - line) < math.abs(than - line) end
+  local best, only, copies = nil, nil, 0
+  for e = n, #lines do
+    if at(e) then
+      copies, only = copies + 1, e
+      if fits(e) and nearer(e, best) then best = e end
+    end
+  end
+  if best then return best end
+  if line <= #lines and at(line) then return line end
+  return copies == 1 and only or nil
 end
 
 -- Renames between the base and the working tree, both ways. Threads always use the current path, like GitHub.
@@ -118,11 +147,25 @@ function M.events(log)
   table.remove(lines) -- after the last newline: empty, or a partial write
   for seq, line in ipairs(lines) do
     local ok, ev = pcall(vim.json.decode, line, { luanil = { object = true, array = true } })
-    if not ok then error(('%s line %d is not valid JSON'):format(log, seq), 0) end
+    -- A write cut short (a full disk, a crash) is lost, but must not take the rest of the review with it.
+    if not ok or type(ev) ~= 'table' then ev = { type = 'unreadable' } end
     ev.seq = seq
     events[seq] = ev
   end
   return events
+end
+
+-- How far the agent has read a thread: to its last ack there, or, if it never acked, its last reply or resolve.
+-- After an ack, its replies answer what it read then, not what the human added since; only another ack moves it.
+local function saw(t, seq, ack)
+  if ack or not t.seen_by_ack then t.seen_seq, t.seen_by_ack = seq, ack end
+end
+
+-- The human's comments in a loaded thread that the agent hasn't read yet: written or edited since it last did.
+function M.unread(t)
+  return vim.tbl_filter(function(c)
+    return c.role == 'human' and math.max(c.seq, c.edited_seq or 0) > (t.seen_seq or 0)
+  end, t.comments)
 end
 
 -- Replays the log. `viewer` ("human" or "agent") sees its own drafts, but not the other side's until submitted.
@@ -151,7 +194,10 @@ function M.load(log, viewer)
         pending = not review.live, seq = seq }
       comments[ev.id] = c
       table.insert(drafts, c)
-      if threads[ev.thread] and ev.role == 'agent' then threads[ev.thread].ack = nil end -- a reply ends "on it"
+      if threads[ev.thread] and ev.role == 'agent' then -- a reply ends "on it"
+        saw(threads[ev.thread], seq, false)
+        threads[ev.thread].ack = nil
+      end
       -- Answering a resolved thread ("not quite") reopens it, so the agent sees it. A draft reopens it once it is
       -- submitted (or, for its writer, right away), unless it gets deleted: the agent must not learn about drafts.
       if threads[ev.thread] and ev.role == 'human' and threads[ev.thread].resolved then
@@ -162,20 +208,24 @@ function M.load(log, viewer)
       if ev.thread == ev.id and inside then
         threads[ev.id] = {
           id = ev.id, n = #review.threads + 1, path = ev.path, side = ev.side, line = ev.line,
-          start_line = ev.start_line, orig_line = ev.line, code = ev.code, resolved = false, comments = {},
+          start_line = ev.start_line, orig_line = ev.line, code = ev.code, before = ev.before, after = ev.after,
+          resolved = false, comments = {},
         }
         table.insert(review.threads, threads[ev.id])
       end
       if threads[ev.thread] then table.insert(threads[ev.thread].comments, c) end
     elseif ev.type == 'edit' and comments[ev.id] then
-      comments[ev.id].body = ev.body
+      comments[ev.id].body, comments[ev.id].edited_seq = ev.body, seq
     elseif ev.type == 'delete' and comments[ev.id] then
       comments[ev.id].deleted = true
     elseif ev.type == 'resolve' and threads[ev.thread] then
-      threads[ev.thread].resolved, threads[ev.thread].ack, threads[ev.thread].resolved_seq = ev.resolved, nil, seq
-      if ev.role == viewer and not review.live then table.insert(resolves, { seq = seq, n = threads[ev.thread].n }) end
+      local t = threads[ev.thread]
+      if ev.role == 'agent' then saw(t, seq, false) elseif not ev.resolved then t.reopened_seq = seq end
+      t.resolved, t.ack, t.resolved_seq = ev.resolved, nil, seq
+      if ev.role == viewer and not review.live then table.insert(resolves, { seq = seq, n = t.n }) end
     elseif ev.type == 'ack' and threads[ev.thread] then
       threads[ev.thread].ack = { author = ev.author, seq = seq }
+      saw(threads[ev.thread], seq, true)
     elseif ev.type == 'submit' then
       for _, c in ipairs(drafts) do
         if c.role == ev.role then
@@ -194,6 +244,7 @@ function M.load(log, viewer)
     end
   end
 
+  if not review.base then error(log .. ' has no readable start line, so it is not a review', 0) end
   for _, c in ipairs(drafts) do -- your own unsubmitted replies reopen their threads in your own view
     local t = threads[c.thread]
     if c.pending and c.role == viewer and c.reopens and not c.deleted and t and t.resolved and (t.resolved_seq or 0) < c.seq then
@@ -216,13 +267,12 @@ function M.load(log, viewer)
       -- The file was renamed since the comment: follow it.
       if not vim.uv.fs_stat(review.root .. '/' .. t.path) then t.path = M.current_path(review, t.path) end
       files[t.path] = files[t.path] or M.file_lines(review, t.path, 'new') or {}
-      local now = M.relocate(files[t.path], t.code, t.orig_line)
+      local now = M.relocate(files[t.path], t.code, t.orig_line, t.before, t.after)
       if now and t.start_line then t.start_line = t.start_line + now - t.orig_line end
       t.line, t.outdated = now, now == nil
     end
-    -- Waiting on the agent: open, the human spoke last, and the agent hasn't said it's on it since.
-    local last = t.comments[#t.comments]
-    t.needs_agent = last ~= nil and not t.resolved and last.role == 'human' and not (t.ack and t.ack.seq > last.seq)
+    -- Waiting on the agent: open, and the human wrote, edited, or reopened something since the agent last read it.
+    t.needs_agent = not t.resolved and (#M.unread(t) > 0 or (t.reopened_seq or 0) > (t.seen_seq or 0))
     return #t.comments > 0
   end, review.threads)
   -- Live reviews have no strict turns: it's the agent's turn while something waits on it.
@@ -260,10 +310,12 @@ function M.start(root, opts)
   if slug == '' then slug = slugify(vim.fs.basename(root)) end
   if slug == '' then slug = 'review' end
   vim.fn.mkdir(reviews_dir(root), 'p')
+  local indexed = {} -- ids in use in other repos too: `critique <id>` finds a review through the index
+  for _, line in ipairs(read_lines(index_path()) or {}) do indexed[line:match('^[^\t]*')] = true end
   local id
-  for attempt = 1, 100 do -- ids end in 4 random hex chars; never reuse an existing review's log
+  for attempt = 1, 100 do -- ids end in 4 random hex chars; never reuse an existing review's id
     id = slug .. '-' .. (attempt == 1 and rand(2) or ('%04x'):format((tonumber(rand(2), 16) + attempt) % 65536))
-    if not vim.uv.fs_stat(reviews_dir(root) .. '/' .. id .. '.jsonl') then break end
+    if not indexed[id] and not vim.uv.fs_stat(reviews_dir(root) .. '/' .. id .. '.jsonl') then break end
   end
   local ignore = root .. '/.critique/.gitignore'
   if not vim.uv.fs_stat(ignore) then vim.fn.writefile({ '*' }, ignore) end
@@ -297,19 +349,39 @@ local function worktrees(cwd)
   return roots
 end
 
--- Open reviews in this repo (all of its worktrees), or only in the checkout at `root` if given.
 -- A review log that git tracks came with the repo: whoever committed it wrote its "human" comments, which could
 -- tell an agent to do anything. critique's own logs are never committed (.critique/.gitignore ignores them).
-local function committed(root, id)
-  return vim.system({ 'git', '-C', root, 'ls-files', '--error-unmatch', '--', '.critique/reviews/' .. id .. '.jsonl' }):wait().code == 0
+-- Any capitalisation counts (macOS and Windows ignore case), and so does a symlinked folder, which can lead to
+-- tracked files anywhere. Returns a check by review id, for the checkout at `root`.
+local function committed(root)
+  for _, dir in ipairs({ '/.critique', '/.critique/reviews' }) do
+    if (vim.uv.fs_lstat(root .. dir) or {}).type == 'link' then return function() return true end end
+  end
+  local tracked = {}
+  local r = vim.system({ 'git', '-C', root, 'ls-files', '-z', '--', ':(icase).critique/reviews' }):wait()
+  for _, path in ipairs(vim.split(r.stdout or '', '\0', { trimempty = true })) do tracked[path:lower()] = true end
+  return function(id) return tracked[('.critique/reviews/' .. id .. '.jsonl'):lower()] == true end
 end
 
+-- Whether a log has a close event, without loading it (which reads every commented file, and may run git).
+-- JSON escapes quotes inside strings, so this text only appears as the event's own type.
+local function closed(log)
+  local f = io.open(log)
+  if not f then return false end
+  local text = f:read('a')
+  f:close()
+  return text:find('"type":"close"', 1, true) ~= nil
+end
+
+-- Open reviews in this repo (all of its worktrees), or only in the checkout at `root` if given.
 function M.list(cwd, root)
   local found = {}
   for _, wt in ipairs(root and { root } or worktrees(cwd)) do
+    local is_committed = committed(wt)
     for name, kind in vim.uv.fs_stat(reviews_dir(wt)) and vim.fs.dir(reviews_dir(wt)) or function() end do
-      if kind == 'file' and name:match('%.jsonl$') and not committed(wt, name:sub(1, -7)) then
-        local ok, review = pcall(M.load, reviews_dir(wt) .. '/' .. name, 'human')
+      local log = reviews_dir(wt) .. '/' .. name
+      if kind == 'file' and name:match('%.jsonl$') and not is_committed(name:sub(1, -7)) and not closed(log) then
+        local ok, review = pcall(M.load, log, 'human')
         if ok and not review.closed then found[#found + 1] = review end
       end
     end
@@ -326,16 +398,19 @@ function M.find(handle, cwd)
   if at ~= '' then
     roots = { M.git(at, 'rev-parse', '--show-toplevel') }
   else
+    local indexed, here = {}, worktrees(cwd)
     for _, line in ipairs(read_lines(index_path()) or {}) do
       local i, root = line:match('^([^\t]+)\t(.+)$')
-      if i == id then table.insert(roots, 1, root) end
+      if i == id then table.insert(indexed, 1, root) end -- the newest first
     end
-    vim.list_extend(roots, worktrees(cwd))
+    -- Where the index says, and of those, this repo's own first: older ids can be the same in two repos.
+    roots = vim.list_extend(vim.tbl_filter(function(root) return vim.tbl_contains(here, root) end, indexed), indexed)
+    vim.list_extend(roots, here)
   end
   for _, root in ipairs(roots) do
     local log = reviews_dir(root) .. '/' .. id .. '.jsonl'
     if vim.uv.fs_stat(log) then
-      if committed(root, id) then
+      if committed(root)(id) then
         error(('review %s is committed to this repo, so someone else wrote it; critique only opens reviews made here'):format(id), 0)
       end
       return log, n
@@ -371,14 +446,18 @@ function M.diff(review, since)
   local out = run(vim.list_extend({ 'git', '-C', review.root, unpack(require('critique.diff').GIT_ARGS) },
     vim.list_extend({ review.base, '--' }, scope)))
   local untracked = run(vim.list_extend({ 'git', '-C', review.root, 'ls-files', '-z', '--others', '--exclude-standard', '--' }, scope))
-  for _, f in ipairs(vim.split(untracked, '\0', { trimempty = true })) do
-    -- --no-index exits 1 when the files differ, which they always do here; more than 1 is a real failure.
-    local r = vim.system(vim.list_extend({ 'git', unpack(require('critique.diff').GIT_ARGS) }, { '--no-index', '/dev/null', f }),
-      { cwd = review.root }):wait()
-    if r.code > 1 then error(('git diff %s: %s'):format(f, vim.trim(r.stderr)), 0) end
-    out = out .. r.stdout
-  end
-  return out
+  if untracked == '' then return out end
+  -- All untracked files in one diff: an index holding only them, as "intent to add", against the working tree.
+  local tmp = os.tmpname()
+  os.remove(tmp) -- git reads a missing index as empty, but an empty file as corrupt
+  local env = { GIT_INDEX_FILE = tmp, GIT_LITERAL_PATHSPECS = '1' } -- file names are names, not patterns
+  local ok, added = pcall(function()
+    run({ 'git', '-C', review.root, 'add', '--intent-to-add', '--pathspec-from-file=-', '--pathspec-file-nul' }, { env = env, stdin = untracked })
+    return run({ 'git', '-C', review.root, unpack(require('critique.diff').GIT_ARGS) }, { env = env })
+  end)
+  os.remove(tmp)
+  if not ok then error(added, 0) end
+  return out .. added
 end
 
 return M
