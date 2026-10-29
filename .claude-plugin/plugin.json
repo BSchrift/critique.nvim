@@ -1,6 +1,6 @@
 {
   "name": "critique",
-  "version": "0.10.0",
+  "version": "0.11.0",
   "description": "The critique skill: hand your changes to the user for review in critique.nvim (Neovim), answer and fix their comment threads, and review their changes, through the critique command.",
   "author": {
     "name": "BSchrift",
