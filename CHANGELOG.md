@@ -6,6 +6,12 @@ lazy.nvim, `version = '*'` follows them.
 
 ## [Unreleased]
 
+### Changed
+
+- A save from a timer (most auto-save plugins, or a mapping that saves with `vim.schedule`) still leaves
+  your edits alone in a review, but now says so, once: "ignored a save of … from a timer or plugin". It
+  used to do nothing without a word. The README and `:help critique` explain it.
+
 ### Removed
 
 - The LuaRocks workflow. The `critique` command it would have installed couldn't find critique's Lua files,
@@ -13,6 +19,22 @@ lazy.nvim, `version = '*'` follows them.
 
 ### Fixed
 
+- A comment you started before reopening the same PR or review couldn't be saved: `:w` said its review was
+  no longer open. It saves now. A new comment on a PR that got new commits meanwhile is refused instead,
+  since its line may have moved.
+- After `y` on a suggestion, typing while it posted could overwrite a line, leave the suggested text in the
+  file (so the next `:w` posted it again), and mark the file saved. critique now waits for the post
+  (usually under a second), as comment saves do.
+- On a PR with more than 100 threads, the newest didn't show, so a comment you saved vanished and
+  commenting on its line started a second thread. On a PR with more than 100 files, viewed marks
+  past the 100th were lost. critique now loads all of them.
+- Reopening a PR failed when a new file of yours in its checkout was in the way of its new commits. The
+  stash now takes new files too. If the checkout still fails, the error says where your stashed edits
+  went; it used to leave them in the stash without a word.
+- Opening a PR in a very big repo (a million files) froze Neovim for about 2 seconds while it asked git
+  for the files. It takes a few milliseconds now.
+- After you deleted a PR's checkout folder (`.../pr-<number>`), reopening the PR failed, as git still had
+  the folder on record. Reopening makes it again now.
 - `critique -h` and the agent skill showed an invalid review handle (`promo-codes-7k2f`).
 - The README says critique needs git 2.31 or newer, and that ● stays on a viewed file until you mark it
   viewed again.

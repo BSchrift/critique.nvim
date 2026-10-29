@@ -32,20 +32,22 @@ local function signed(body) return M.config.footer and body .. FOOTER or body en
 -- ...and as critique shows it, without (anyone's, any version's), so editing never stacks a second one.
 local function unsigned(body) return (body:gsub('%s*<sub>[^\n]*critique%.nvim[^\n]*</sub>%s*$', '')) end
 
--- shortcut: first 100 threads, 100 comments per thread, and 100 files' viewed marks; paginate if PRs outgrow that.
+-- Files and threads come 100 a page (fetch_pr asks for the rest).
+-- shortcut: 100 comments per thread, and your last review among the last 100; paginate if PRs outgrow that.
 local PR_QUERY = [[
-query($owner: String!, $name: String!, $number: Int!) {
+query($owner: String!, $name: String!, $number: Int!, $files: String, $reviewThreads: String) {
   repository(owner: $owner, name: $name) {
     pullRequest(number: $number) {
       id title headRefOid baseRefOid
       reviews(states: PENDING, first: 1) { nodes { id } }
       submitted: reviews(last: 100, states: [APPROVED, CHANGES_REQUESTED, COMMENTED, DISMISSED]) { nodes { viewerDidAuthor commit { oid } } }
-      files(first: 100) { nodes { path viewerViewedState } }
-      reviewThreads(first: 100) {
+      files(first: 100, after: $files) { nodes { path viewerViewedState } pageInfo { hasNextPage endCursor } }
+      reviewThreads(first: 100, after: $reviewThreads) {
         nodes {
           id isResolved isOutdated path line originalLine diffSide
           comments(first: 100) { nodes { id databaseId body state viewerDidAuthor author { login } } }
         }
+        pageInfo { hasNextPage endCursor }
       }
     }
   }
@@ -235,7 +237,16 @@ local function read_base(buf)
 end
 
 local function fetch_pr(st)
-  local pr = gh.gql(st.host, PR_QUERY, { owner = st.owner, name = st.name, number = st.number }).repository.pullRequest
+  local vars, more, pr = { owner = st.owner, name = st.name, number = st.number }, { files = true, reviewThreads = true }, nil
+  while next(more) do -- the next page of each list that has one; a finished list is asked for after its end (empty)
+    local page = gh.gql(st.host, PR_QUERY, vars).repository.pullRequest
+    pr = pr or vim.tbl_extend('force', page, { files = { nodes = {} }, reviewThreads = { nodes = {} } })
+    for key in pairs(more) do
+      vim.list_extend(pr[key].nodes, page[key].nodes)
+      vars[key] = page[key].pageInfo.endCursor or vars[key]
+      more[key] = page[key].pageInfo.hasNextPage or nil
+    end
+  end
   st.pr_id, st.review_id = pr.id, (pr.reviews.nodes[1] or {}).id
   st.viewed = {}
   for _, f in ipairs(pr.files.nodes) do st.viewed[f.path] = ({ VIEWED = 'viewed', DISMISSED = 'changed' })[f.viewerViewedState] end
@@ -385,7 +396,9 @@ local function fetch_files(git_dir, rev, on_progress)
   local ids = {}
   for id in gh.git(git_dir, 'ls-tree', '-r', rev):gmatch(' blob (%x+)\t') do ids[#ids + 1] = id end
   if #ids == 0 then return true end -- with nothing to ask for, git would fetch every branch
-  return gh.git_progress(git_dir, on_progress, { 'fetch', '--progress', '--no-tags', '--no-write-fetch-head', '--stdin', 'origin' }, ids)
+  -- One string: given a list, vim.system writes each id separately, which blocks Neovim for seconds in a monorepo.
+  return gh.git_progress(git_dir, on_progress, { 'fetch', '--progress', '--no-tags', '--no-write-fetch-head', '--stdin', 'origin' },
+    table.concat(ids, '\n') .. '\n')
 end
 
 local function must(ok, err)
@@ -482,9 +495,13 @@ local function save(buf, ctx)
   if not at then error('keep the "<!-- ▼ write below … ▼ -->" line; your comment goes below it', 0) end
   local body = vim.trim(table.concat(lines, '\n', at + 1))
   if body == '' then error('comment is empty; nothing saved', 0) end
-  if ctx.review ~= S then
+  local from = ctx.review -- reopening a review makes a new S: the same review is the same log, or the same PR
+  if from ~= S and not (from.log and from.log == S.log or from.pr_id and from.host == S.host and from.pr_id == S.pr_id) then
     error(('this comment is for %s, which is no longer open: reopen it to save this comment, or :q! to drop it')
-      :format(ctx.review.title), 0)
+      :format(from.title), 0)
+  end
+  if ctx.anchor and from.head ~= S.head then -- its line number is in the PR as it was
+    error("the PR has new commits since you started this comment, so its line may have moved: copy your text, :q!, and comment again", 0)
   end
   local reopens = post(ctx, body)
   if vim.api.nvim_buf_is_valid(buf) then vim.bo[buf].modified = false end
@@ -627,7 +644,8 @@ local function suggest(buf)
     if not asking then return end
     asking = false
     pcall(vim.api.nvim_win_close, win, true)
-    if yes and ok > 0 then gh.async(post_suggestions)(buf, path, list) end
+    -- Wait for the post, as comment saves do: typing meanwhile would move the lines it then puts back.
+    if yes and ok > 0 then gh.wait(function() post_suggestions(buf, path, list) end) end
     local nxt = table.remove(waiting, 1)
     if nxt and vim.api.nvim_buf_is_valid(nxt) then vim.schedule(function() suggest(nxt) end) end
   end
@@ -635,6 +653,8 @@ local function suggest(buf)
   for _, key in ipairs({ 'n', 'q', '<Esc>' }) do vim.keymap.set('n', key, function() finish(false) end, { buffer = fbuf, nowait = true }) end
   vim.api.nvim_create_autocmd('BufLeave', { buffer = fbuf, once = true, callback = function() vim.schedule(function() finish(false) end) end })
 end
+
+local hinted = false -- said once why a save from a timer did nothing
 
 -- With auto_suggest on, :w in a review file asks to post your edits as suggestions instead of writing the file.
 local function on_write(ev)
@@ -648,6 +668,10 @@ local function on_write(ev)
     if not ok then error(err, 0) end
   elseif vim.fn.state():find('S') then -- a save you made; an auto-save timer (no S) leaves your edits alone
     vim.schedule(function() suggest(buf) end)
+  elseif not hinted then
+    hinted = true
+    notify(('ignored a save of %s from a timer or plugin (auto-save?), so your edits stay unsaved: in a review, '
+      .. 'a :w you type offers them as suggestions, as does :Critique suggest'):format(buf_path(buf)))
   end
 end
 
@@ -822,6 +846,13 @@ local function open_local(handle)
   vim.schedule(function() notify(msg) end) -- after startup's first redraw, which would wipe it when opened via `nvim -c`
 end
 
+-- Where your edits in a PR's checkout went when they were in the way of its new commits.
+local function stash_note(files, wt)
+  return ("your edits to %s in the PR's checkout were in the way of its new commits, so they're stashed. "
+    .. 'To get them back: git -C %s stash pop'):format(#files <= 3 and table.concat(files, ', ') or plural(#files, 'file'),
+    vim.fn.shellescape(wt))
+end
+
 function cmds.open(o)
   local url = table.concat(o.fargs, ' ', 2) -- handles can contain spaces (a checkout path)
   local host, owner, name, number = url:match('^https?://([^/]+)/([^/]+)/([^/]+)/pull/(%d+)')
@@ -864,16 +895,22 @@ function cmds.open(o)
   st.base = gh.all({
     function() return gh.merge_base(host, owner, name, pr.baseRefOid, pr.headRefOid) end,
     function()
-      if fresh then gh.git(git_dir, 'worktree', 'add', '--quiet', '--no-checkout', '--detach', wt, pr.headRefOid) end
+      if fresh then
+        gh.git(git_dir, 'worktree', 'prune') -- forget a checkout folder you deleted, or git won't make it again
+        gh.git(git_dir, 'worktree', 'add', '--quiet', '--no-checkout', '--detach', wt, pr.headRefOid)
+      end
       must(fetch_files(git_dir, pr.headRefOid, progress.show))
       progress.set('checking out the files')
       local ok, err = gh.git_progress(wt, progress.show, { 'checkout', '--progress', '--detach', pr.headRefOid })
-      if not ok and not fresh then
+      local edited = not ok and not fresh and vim.tbl_map(function(l) return l:sub(4) end, -- "XY path"
+        vim.split(gh.git(wt, 'status', '--porcelain', '--untracked-files=all'), '\n', { trimempty = true }))
+      if edited and #edited > 0 then
         -- Edits in the checkout are in the way of the new commits (saved with auto_suggest off, by an auto-save
-        -- plugin, or by critique before 0.2). Stash them, so nothing is lost, and try again.
-        st.stashed = vim.split(vim.trim(gh.git(wt, 'diff', 'HEAD', '--name-only')), '\n', { trimempty = true })
-        gh.git(wt, 'stash', 'push', '-m', ('critique: your edits, set aside to reopen PR #%d'):format(st.number))
+        -- plugin, or by critique before 0.2). Stash them, new files too, so nothing is lost, and try again.
+        gh.git(wt, 'stash', 'push', '--include-untracked', '-m', ('critique: your edits, set aside to reopen PR #%d'):format(st.number))
+        st.stashed = edited
         ok, err = gh.git_progress(wt, progress.show, { 'checkout', '--progress', '--detach', pr.headRefOid })
+        if not ok then err = err .. '\n' .. stash_note(edited, wt) end
       end
       must(ok, err)
     end,
@@ -891,11 +928,7 @@ function cmds.open(o)
   goto_anchor(url)
   notify(('%s · %s changed%s'):format(S.title, plural(#S.files, 'file'),
     S.reviewed and S.reviewed ~= S.head and ' · new commits since your last review: :Critique since' or ''))
-  if st.stashed then
-    local files = #st.stashed <= 3 and table.concat(st.stashed, ', ') or plural(#st.stashed, 'file')
-    notify(("your edits to %s in the PR's checkout were in the way of its new commits, so they're stashed. "
-      .. 'To get them back: git -C %s stash pop'):format(files, vim.fn.shellescape(wt)), vim.log.levels.WARN)
-  end
+  if st.stashed then notify(stash_note(st.stashed, wt), vim.log.levels.WARN) end
 end
 
 -- Shows the review's list of files or threads, even when another quickfix list is the current one.

@@ -380,7 +380,7 @@ clipboard provider, it goes to the unnamed register only, so `p` pastes it.
   that holds only the commits reviews need, fetched one at a time without their history (`--depth=1`):
   each PR's head, and the merge base its diff starts from, which GitHub's API reports. File contents
   download as they're needed (a partial clone). Each PR gets a git worktree next to it at
-  `.../pr-<number>`. While a PR opens, critique asks GitHub for the PR and fetches its head at the
+  `.../pr-<number>`; deleting one is safe, as reopening the PR makes it again. While a PR opens, critique asks GitHub for the PR and fetches its head at the
   same time, and looks up the merge base while the files download. Neovim's working directory is set to that worktree, which is why every
   other tool just works. Reopening a PR fetches new commits and checks out the PR head; if edits saved in the worktree are in
   the way, critique stashes them first and tells you how to get them back. Comments go through
@@ -413,6 +413,7 @@ clipboard provider, it goes to the unnamed register only, so `p` pastes it.
 | `save or undo your edits first` | Comments are placed by line number, so the buffer must match the file. `:w` to post your edits as suggestions, or undo (`u`, `:e!`). |
 | `:w` doesn't save the file | By design: `:w` in a review offers your edits as suggestions. In a local review, `:w!` writes the file. Set `auto_suggest = false` to make `:w` save as usual. |
 | The suggestion window pops up while I type | An auto-save plugin is saving on every change. Set `auto_suggest = false` and use `:Critique suggest`. |
+| `ignored a save … from a timer or plugin` | A timer saved the file: most auto-save plugins do, and so does a mapping that saves later (`vim.schedule`, `vim.defer_fn`). Only saves you make offer suggestions, so your edits stay unsaved. Type `:w`, or use `:Critique suggest`. With `auto_suggest = false`, such saves write the file. |
 | `:Critique since` says "nothing to compare yet" or "can't fetch" | Local: it compares with your last `:Critique submit`, so submit once first. GitHub: your last review's commit was force-pushed away. |
 | critique says your edits were stashed | Edits saved in the PR's checkout were in the way of its new commits. Nothing is lost: run the `git -C … stash pop` from the message to get them back. |
 | LSP errors about missing dependencies | The worktree is a fresh checkout. Install the project's dependencies there as you would for any clone. |
@@ -448,8 +449,7 @@ itself: reading and commenting on code you can navigate like any other.
 
 ## Limits
 
-- GitHub: loads up to 100 review threads per PR, 100 comments per thread, and viewed marks for 100 files.
-  The overview shows the last 100 comments and checks.
+- GitHub: loads up to 100 comments per thread. The overview shows the last 100 comments and checks.
 - Local `:Critique since` snapshots are git objects nothing points to, so `git gc` may delete them after
   about two weeks. Submit again to take a new one.
 - In local reviews, a binary file that changes after you mark it viewed keeps its ✓.

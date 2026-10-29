@@ -59,14 +59,23 @@ local OLD_FOOTERS = { -- earlier versions' footers, which critique hides too
   '\n\n<sub>Made with [critique.nvim](https://github.com/BSchrift/critique.nvim)</sub>',
   '\n\n<sub><a href="https://github.com/BSchrift/critique.nvim"><img src="https://raw.githubusercontent.com/BSchrift/critique.nvim/main/assets/icon-512.png" height="14" alt=""></a> Made with [critique.nvim](https://github.com/BSchrift/critique.nvim)</sub>',
 }
-local threads, overview, reviewed = {}, nil, nil -- "GitHub's" PR threads, overview, and the commit of your last review
+-- "GitHub's" PR threads, files' viewed states, overview, and the commit of your last review
+local threads, files, overview, reviewed = {}, {}, nil, nil
+local pages = 0 -- PR queries answered
+-- A GitHub list, 100 a page: the page after cursor `after`. Past the end, it's empty and has no cursor.
+local function page(nodes, after)
+  local from = tonumber(after) or 0
+  local last = math.min(#nodes, from + 100)
+  return { nodes = vim.list_slice(nodes, from + 1, last), pageInfo = { hasNextPage = last < #nodes, endCursor = last > from and tostring(last) or nil } }
+end
 gh.gql = function(_, query, vars)
   if query:find('statusCheckRollup') then return { repository = { pullRequest = overview } } end
   assert(query:find('reviewThreads'), 'unexpected query')
+  pages = pages + 1
   local repo = origins[vars.name]
   return { repository = { pullRequest = {
     id = 'PR_' .. vars.number, title = 'Change two', headRefOid = H.git(repo, 'rev-parse', 'pr'), baseRefOid = H.git(repo, 'rev-parse', 'main'),
-    reviews = { nodes = {} }, files = { nodes = {} }, reviewThreads = { nodes = vim.deepcopy(threads) },
+    reviews = { nodes = {} }, files = page(files, vars.files), reviewThreads = page(vim.deepcopy(threads), vars.reviewThreads),
     submitted = { nodes = reviewed and { { viewerDidAuthor = true, commit = { oid = reviewed } } } or {} },
   } } }
 end
@@ -129,6 +138,31 @@ H.test('reopening after new commits stashes edits in their way, instead of faili
   H.has(H.git(checkout, 'stash', 'list'), 'critique: your edits, set aside to reopen PR #7')
   H.has(H.git(checkout, 'stash', 'show', '-p'), '+mine')
 end)
+H.test('a new file of yours in the way of new commits is stashed too', function()
+  H.write(checkout, 'c.txt', { 'mine' })
+  H.write(origin, 'c.txt', { 'theirs' })
+  H.git(origin, 'add', 'c.txt')
+  push(origin, 7, { 'one', 'TWO!', 'three' })
+  local msgs = open()
+  H.eq(vim.fn.readfile(checkout .. '/c.txt'), { 'theirs' })
+  H.has(msgs[#msgs], "your edits to c.txt in the PR's checkout were in the way of its new commits, so they're stashed")
+  H.eq(H.git(checkout, 'show', 'stash@{0}^3:c.txt'), 'mine', 'in the stash, with the other new files')
+end)
+H.test('if the checkout still fails, the error says where your stashed edits went', function()
+  H.write(checkout, 'a.txt', { 'mine again' })
+  H.write(checkout, 'd/x.log', { 'ignored' }) -- git won't stash an ignored file, nor delete its folder
+  local exclude = cache .. '/repo.git/info/exclude'
+  H.write(cache .. '/repo.git', 'info/exclude', { '*.log' })
+  H.write(origin, 'd', { 'a file where your folder is' })
+  H.git(origin, 'add', 'd')
+  push(origin, 7, { 'one', 'TWO!!', 'three' })
+  local msgs = open()
+  H.has(msgs[#msgs], 'would lose untracked files')
+  H.has(msgs[#msgs], "your edits to a.txt in the PR's checkout were in the way of its new commits, so they're stashed")
+  vim.fn.delete(checkout .. '/d', 'rf')
+  vim.fn.delete(exclude)
+  H.has(open()[1], '#7 Change two')
+end)
 
 H.test('in an open review, it comments on the cursor line, instead of opening another review', function()
   open()
@@ -183,6 +217,27 @@ H.test(':Critique since downloads the commit of your last review the same way', 
   end)
   reviewed = nil
   assert(ok, err)
+end)
+H.test("the files' ids go to git in one piece, not one write per file", function()
+  local system, stdin = vim.system, nil
+  vim.system = function(cmd, opts, ...)
+    if vim.tbl_contains(cmd, '--stdin') then stdin = opts.stdin end
+    return system(cmd, opts, ...)
+  end
+  local ok, err = pcall(open, nil, URL8)
+  vim.system = system
+  assert(ok, err)
+  H.eq(type(stdin), 'string')
+  local ids = {}
+  for id in H.git(origin8, 'ls-tree', '-r', 'pr'):gmatch(' blob (%x+)\t') do ids[#ids + 1] = id end
+  H.eq(stdin, table.concat(ids, '\n') .. '\n')
+end)
+H.test('reopening a PR whose checkout folder you deleted makes a new one', function()
+  vim.cmd('silent! %bwipeout!')
+  vim.fn.delete(cache8 .. '/pr-8', 'rf')
+  local msgs = open(nil, URL8)
+  H.has(msgs[#msgs], '#8 Change two · 1 file changed')
+  H.eq(vim.fn.readfile(cache8 .. '/pr-8/a.txt'), { 'one', 'TWO again', 'three' })
 end)
 H.test('a failed download stops the progress line and says why', function()
   echoes = {}
@@ -310,6 +365,190 @@ H.test("the overview doesn't show footers", function()
   H.has(text, '### amy · 2026-10-27\n\nShip it')
   H.lacks(text, 'critique.nvim')
   H.lacks(text, '### me', 'a review that was only a footer is a bare review')
+  vim.cmd('quit')
+end)
+
+H.section('a comment belongs to its PR')
+-- Opens a PR like open(), but from the window you were in before, keeping the comment you're writing.
+local function open_beside(url)
+  local cwin, before = vim.api.nvim_get_current_win(), #messages
+  vim.cmd.wincmd('p')
+  vim.cmd('Critique open ' .. (url or URL))
+  H.wait_for(function()
+    return vim.iter(messages_since(before)):any(function(m) return m:find(' changed', 1, true) end)
+  end, 'the PR to open')
+  vim.fn.win_gotoid(cwin)
+end
+local function type_comment(text)
+  local lines = vim.api.nvim_buf_get_lines(0, 0, -1, false)
+  vim.api.nvim_buf_set_lines(0, #lines - 1, -1, false, { text })
+end
+local function refused_write()
+  local count, before = #sent, #messages
+  vim.cmd('write')
+  H.wait_for(function() return #messages > before end, 'the refusal')
+  H.eq({ #sent, vim.bo.modified }, { count, true }, 'sent nothing, and the text is still there')
+  local msg = messages[#messages].msg
+  vim.cmd('quit!')
+  return msg
+end
+H.test('a comment started before reopening the same PR still saves', function()
+  open()
+  on_line('a.txt', 2)
+  vim.cmd('Critique comment')
+  open_beside()
+  write_comment('Still for PR 7')
+  H.eq(last_sent('addPullRequestReviewThread').body, 'Still for PR 7' .. FOOTER)
+end)
+H.test('a comment started before opening another PR is refused, and kept', function()
+  open()
+  on_line('a.txt', 2)
+  vim.cmd('Critique comment')
+  type_comment('For PR 7')
+  open_beside(URL8)
+  H.has(refused_write(), 'this comment is for #7 Change two, which is no longer open')
+end)
+H.test('a new comment started before the PR got new commits is refused, since its line may have moved', function()
+  open()
+  on_line('a.txt', 2)
+  vim.cmd('Critique comment')
+  type_comment('On the old line 2')
+  push(origin, 7, { 'zero', 'one', 'TWO!!', 'three' })
+  open_beside()
+  H.has(refused_write(), 'the PR has new commits since you started this comment')
+end)
+
+H.section('suggestions')
+local function float_open()
+  return vim.iter(vim.api.nvim_list_wins()):any(function(w) return vim.api.nvim_win_get_config(w).relative ~= '' end)
+end
+H.test('y posts before you can type again: the file is back as it was, and a second :w has nothing to post', function()
+  open()
+  on_line('a.txt', 3)
+  local disk = vim.api.nvim_buf_get_lines(0, 0, -1, false)
+  vim.api.nvim_buf_set_lines(0, 2, 3, false, { 'TWO?' })
+  local count = #sent
+  vim.cmd('write')
+  H.wait_for(float_open, 'the suggestion window')
+  vim.api.nvim_feedkeys('y', 'x', false)
+  H.eq({ vim.api.nvim_buf_get_lines(0, 0, -1, false), vim.bo.modified }, { disk, false }, 'posted and put back already')
+  local before = #messages
+  vim.cmd('write')
+  H.wait_for(function() return #messages > before end, 'the second :w')
+  H.has(messages[#messages].msg, 'no edits to suggest in a.txt')
+  H.eq(vim.tbl_map(function(m) return m[1] end, vim.list_slice(sent, count + 1)), { 'addPullRequestReview', 'addPullRequestReviewThread' })
+end)
+
+H.section('big PRs')
+H.test('every thread and viewed mark arrives, past the first 100', function()
+  local many = {}
+  for i = 1, 250 do
+    many[i] = { id = 'T_' .. i, isResolved = false, isOutdated = false, path = 'a.txt', line = 3, diffSide = 'RIGHT', comments = { nodes = {
+      { id = 'C_' .. i, databaseId = i, body = 'Thread ' .. i, state = 'SUBMITTED', viewerDidAuthor = false, author = { login = 'amy' } },
+    } } }
+  end
+  for i = 1, 149 do files[i] = { path = ('other%d.txt'):format(i), viewerViewedState = 'UNVIEWED' } end
+  files[150] = { path = 'a.txt', viewerViewedState = 'VIEWED' }
+  pages = 0
+  local ok, err = pcall(function()
+    open(many)
+    H.eq(pages, 3, '250 threads are 3 pages')
+    local a = vim.iter(vim.fn.getqflist()):find(function(i) return vim.fn.bufname(i.bufnr):find('a%.txt$') end)
+    H.has(a.text, '✓ ', 'a.txt, the 150th file, is viewed')
+    vim.cmd('Critique threads')
+    H.wait_for(function() return vim.fn.getqflist({ title = 0 }).title:find('open threads') end, 'the thread list')
+    local seen = {}
+    for _, item in ipairs(vim.fn.getqflist()) do seen[tonumber(item.text:match('Thread (%d+)'))] = true end
+    H.eq({ vim.tbl_count(seen), seen[250] }, { 250, true }, 'each thread once, the newest too')
+  end)
+  files = {}
+  assert(ok, err)
+end)
+
+H.section('links, threads, viewed marks, and the overview')
+local function where() return (vim.api.nvim_buf_get_name(0):gsub('^.*/pr%-7/', '')) .. ':' .. vim.fn.line('.') end
+local function mine(id, resolved) -- a thread on a.txt:3 with your pending comment
+  return { id = 'T_' .. id, isResolved = resolved or false, isOutdated = false, path = 'a.txt', line = 3, diffSide = 'RIGHT', comments = { nodes = {
+    { id = 'C_' .. id, databaseId = id, body = 'Mine', state = 'PENDING', viewerDidAuthor = true, author = { login = 'me' } },
+  } } }
+end
+-- Runs a :Critique command and returns the message it ends with.
+local function run(cmd)
+  local before = #messages
+  vim.cmd(cmd)
+  H.wait_for(function() return #messages > before end, cmd)
+  return messages[#messages].msg
+end
+H.test('a link to a line, a file, or a comment opens there', function()
+  local hash = vim.fn.sha256('a.txt')
+  open(nil, URL .. '/files#diff-' .. hash .. 'R3')
+  H.eq(where(), 'a.txt:3')
+  open(nil, URL .. '/files#diff-' .. hash .. 'L2')
+  H.eq(where(), 'critique://base/a.txt:2')
+  open(nil, URL .. '/files#diff-' .. hash)
+  H.eq(where(), 'a.txt:1', "the file's first change")
+  open({ mine(42) }, URL .. '#discussion_r42')
+  H.eq(where(), 'a.txt:3')
+  local msgs = open(nil, URL .. '/files#diff-' .. vim.fn.sha256('nope.txt'))
+  H.ok(vim.iter(msgs):any(function(m) return m:find("the link points at something that is not in this PR's diff", 1, true) end), vim.inspect(msgs))
+end)
+H.test(':Critique link copies a permalink to the line or lines, at the commit the buffer shows', function()
+  open()
+  on_line('a.txt', 3)
+  local head, base = H.git(origin, 'rev-parse', 'pr'), H.git(origin, 'merge-base', 'main', 'pr')
+  vim.cmd('Critique link')
+  H.eq(vim.fn.getreg('"'), ('https://github.example/o/r/blob/%s/a.txt#L3'):format(head))
+  vim.cmd('2,3Critique link')
+  H.eq(vim.fn.getreg('"'), ('https://github.example/o/r/blob/%s/a.txt#L2-L3'):format(head))
+  vim.cmd('Critique before')
+  vim.cmd('Critique link')
+  H.eq(vim.fn.getreg('"'), ('https://github.example/o/r/blob/%s/a.txt#L2'):format(base), 'the base version, at the line mapped there')
+end)
+H.test('resolve, unresolve, delete, and viewed go to GitHub', function()
+  local select = vim.ui.select
+  vim.ui.select = function(items, _, cb) cb(items[1]) end
+  local ok, err = pcall(function()
+    open({ mine(5) })
+    on_line('a.txt', 3)
+    H.eq(run('Critique resolve'), 'critique: thread resolved')
+    H.eq(last_sent('resolveReviewThread'), { threadId = 'T_5' })
+    H.eq(run('Critique delete'), 'critique: comment deleted')
+    H.eq(last_sent('deletePullRequestReviewComment'), { id = 'C_5' })
+    open({ mine(6, true) })
+    on_line('a.txt', 3)
+    H.eq(run('Critique resolve'), 'critique: thread unresolved')
+    H.eq(last_sent('unresolveReviewThread'), { threadId = 'T_6' })
+    H.has(run('Critique viewed'), 'viewed')
+    H.eq(last_sent('markFileAsViewed'), { pullRequestId = 'PR_7', path = 'a.txt' })
+    H.ok(where() ~= 'a.txt:3', 'moved on to the next file')
+    on_line('a.txt', 3)
+    H.has(run('Critique viewed'), 'not viewed: a.txt')
+    H.eq(last_sent('unmarkFileAsViewed'), { pullRequestId = 'PR_7', path = 'a.txt' })
+  end)
+  vim.ui.select = select
+  assert(ok, err)
+end)
+H.test('the overview counts the checks that passed and lists the rest', function()
+  overview = { url = URL, body = '', state = 'OPEN', isDraft = true, reviewDecision = 'CHANGES_REQUESTED', baseRefName = 'main',
+    headRefName = 'pr', author = { login = 'amy' }, comments = { nodes = {} }, reviews = { nodes = {} },
+    commits = { nodes = { { commit = { statusCheckRollup = { state = 'FAILURE', contexts = { nodes = {
+      { name = 'lint', status = 'COMPLETED', conclusion = 'SUCCESS' },
+      { name = 'docs', status = 'COMPLETED', conclusion = 'SKIPPED' },
+      { name = 'test (linux)', status = 'COMPLETED', conclusion = 'FAILURE' },
+      { name = 'deploy', status = 'IN_PROGRESS' },
+      { context = 'ci/legacy', state = 'SUCCESS' },
+    } } } } } } } }
+  open()
+  vim.cmd('Critique overview')
+  H.wait_for(function() return vim.api.nvim_buf_get_name(0) == 'critique://overview' end, 'the overview')
+  H.eq(vim.api.nvim_buf_get_lines(0, 1, 9, false), {
+    'amy wants to merge `pr` into `main` · open · draft', URL, '',
+    'Review: changes requested',
+    'Checks: failure · 2 passed, 1 skipped',
+    '- ✗ test (linux) (failure)',
+    '- • deploy (in progress)',
+    '',
+  })
   vim.cmd('quit')
 end)
 

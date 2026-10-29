@@ -270,8 +270,9 @@ group in your config, e.g. >lua
   `~/.cache/nvim/critique/<host>/<owner>/<repo>/repo.git` holding only the
   commits reviews need, without their history: each PR's head, and its merge
   base, which GitHub's API reports. File contents download as needed. Each
-  PR gets a git worktree next to it at `.../pr-<number>`. A progress line
-  shows each step while a PR opens. PR checkouts have no history, so `git
+  PR gets a git worktree next to it at `.../pr-<number>`; deleting one is
+  safe, as reopening the PR makes it again. A progress line shows each step
+  while a PR opens. PR checkouts have no history, so `git
   log` and blame there stop at the PR's head. Reopening fetches the new head
   and checks it out. If edits saved in the worktree are in the way
   of new commits, critique stashes them first and tells you how to get them
@@ -280,9 +281,8 @@ group in your config, e.g. >lua
   of context, rename detection, Myers algorithm. Your git config can't change
   the hunks.
 - Comments go through GitHub's GraphQL API via `gh api graphql`.
-- Loads up to 100 threads per PR, 100 comments per thread, and viewed marks
-  for 100 files. Outdated threads (on code that has since changed) stay at
-  the line they were on, marked outdated.
+- Loads up to 100 comments per thread. Outdated threads (on code that has
+  since changed) stay at the line they were on, marked outdated.
 - |:Critique-since| diffs the commit your last review was on against the PR
   head. In a local review, `:Critique submit` saves a snapshot of the working
   tree as git objects (through a temporary index; your staging area and
@@ -329,6 +329,12 @@ Disk space ~
 The suggestion window pops up while I type ~
     An auto-save plugin saves on every change. Turn off auto_suggest and use
     |:Critique-suggest|.
+
+"ignored a save ... from a timer or plugin" ~
+    A timer saved the file: most auto-save plugins do, and so does a mapping
+    that saves later (|vim.schedule()|, |vim.defer_fn()|). Only saves you
+    make offer suggestions, so your edits stay unsaved. Type `:w`, or use
+    |:Critique-suggest|. With auto_suggest off, such saves write the file.
 
 "nothing to compare yet" / "can't fetch" from :Critique since ~
     Local review: it compares with your last `:Critique submit`; submit once
@@ -442,10 +448,10 @@ file.
 Auto-save plugins ~
 critique asks only about saves you make (`:w`, a mapping, `:wq`) and leaves
 your edits alone when a timer saves them, which is how most auto-save
-plugins work. Plugins that save on an event (|InsertLeave|, |TextChanged|)
-look like you to critique, so the window pops up, and some of them write the
-file directly, which critique can't stop. If you use one, turn auto_suggest
-off and use |:Critique-suggest|.
+plugins work; it says so the first time. Plugins that save on an event
+(|InsertLeave|, |TextChanged|) look like you to critique, so the window pops
+up, and some of them write the file directly, which critique can't stop. If
+you use one, turn auto_suggest off and use |:Critique-suggest|.
 
 ==============================================================================
 12. Configuration                                            *critique-config*
