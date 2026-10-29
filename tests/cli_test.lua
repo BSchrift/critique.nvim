@@ -853,6 +853,20 @@ H.test('a (re)started watch first lists the threads already waiting for you, the
   H.has(all, '#1 waiting · cart/cart.go:4 · Tester: waiting since before')
   H.lacks(all, 'acked already')
 end)
+H.test('a (re)started watch shows the comment that waits, even when your reply came after it', function()
+  local root, _, log = live_setup()
+  local t = human_comment(log, { body = 'first' })
+  H.run(root, { 'ack', '1' })
+  human(log, { type = 'comment', id = store.new_id(), thread = t, body = 'added after your ack' })
+  H.run(root, { 'reply', '1', 'done' })
+  local out, done = {}, false
+  vim.system({ H.bin, 'watch', '--settle', '0' }, { cwd = root, stdout = function(_, d) if d then table.insert(out, d) end end },
+    function() done = true end)
+  H.wait_for(function() return table.concat(out):find('(critique list -r ', 1, true) end, 'the waiting thread', 10000)
+  human(log, { type = 'close' })
+  H.wait_for(function() return done end, 'watch to exit', 10000)
+  H.has(table.concat(out), '#1 waiting · cart/cart.go:4 · Tester: added after your ack')
+end)
 
 
 H.section('live reviews: UX review round 1')

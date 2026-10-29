@@ -419,7 +419,8 @@ function C.watch(o)
   for _, t in ipairs(r.threads) do
     for _, c in ipairs(t.comments) do printed[c.id] = true end
     if t.needs_agent then
-      local c = t.comments[#t.comments]
+      local unread = store.unread(t)
+      local c = unread[#unread] or t.comments[#t.comments]
       table.insert(pending, ('#%d waiting · %s:%s · %s: %s'):format(t.n, t.path, t.line or t.orig_line, c.author, (c.body:match('^[^\r\n]*'))))
     end
   end
