@@ -7,6 +7,7 @@ jobs:
   test:
     name: ${{ matrix.os }}, Neovim ${{ matrix.neovim }}
     runs-on: ${{ matrix.os }}
+    timeout-minutes: 15 # the suite takes about 5; a hung job would otherwise run for 6 hours
     continue-on-error: ${{ matrix.neovim == 'nightly' }}
     strategy:
       fail-fast: false

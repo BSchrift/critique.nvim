@@ -15,7 +15,7 @@ Usage:
 GitHub PR links can point at a file, line, or comment, on github.com or GitHub Enterprise:
   critique https://github.com/owner/repo/pull/123/changes#diff-<hash>R31
 A local review handle is its id, optionally with @<checkout path> and #<thread>:
-  critique promo-codes-7k2f#3
+  critique promo-codes-7a2f#3
 
 HELP
     NVIM_LOG_FILE="${NVIM_LOG_FILE:-/dev/null}" nvim -l "$plugin/lua/critique/cli.lua" --help

@@ -1,6 +1,6 @@
 ---
 name: critique
-description: Local code review loop with the user through critique.nvim. Use when the user wants to review your changes in critique ("hand it to me for review", "use critique", "I'll review it in critique", "review it live"), asks you to "address my critique comments", "check critique", or "watch my critique comments", gives you a critique review handle like `promo-codes-7k2f`, or asks you to review their local changes with comments. Covers starting a review, handing it off, waiting for the user's comments, answering and fixing threads, and leaving review comments yourself.
+description: Local code review loop with the user through critique.nvim. Use when the user wants to review your changes in critique ("hand it to me for review", "use critique", "I'll review it in critique", "review it live"), asks you to "address my critique comments", "check critique", or "watch my critique comments", gives you a critique review handle like `promo-codes-7a2f`, or asks you to review their local changes with comments. Covers starting a review, handing it off, waiting for the user's comments, answering and fixing threads, and leaving review comments yourself.
 ---
 
 # critique: review loop with the user
@@ -123,7 +123,7 @@ a submit, and your replies and resolves reach them right away.
   - ...
   EOF
   ```
-- Given a handle by the user (`promo-codes-7k2f`, `promo-codes-7k2f@/path`, or `promo-codes-7k2f#3`), use
+- Given a handle by the user (`promo-codes-7a2f`, `promo-codes-7a2f@/path`, or `promo-codes-7a2f#3`), use
   `-r` with the part before `#`. Running `critique <handle>` yourself opens nothing; that's for the user.
 
 ## Commands

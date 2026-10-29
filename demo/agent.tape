@@ -2,6 +2,7 @@
 # Needs vhs, tmux, Go, and Claude Code (logged in). Builds a throwaway repo with demo/agent-setup.sh, then runs
 # Claude Code (left) and you in Neovim (right). Claude's long thinking stretches are hidden to keep it short.
 Output demo/agent.mp4
+Output demo/agent.gif
 
 Set Shell "zsh"
 Set FontSize 14

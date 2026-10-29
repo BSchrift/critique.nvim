@@ -55,8 +55,8 @@ suggestion with one click; an agent applies it as written. `:Critique suggest` d
 - `:Critique threads` lists the open threads at the bottom (who's waiting on whom, pending, outdated);
   `]q` / `[q` go from one to the next. `:Critique files` switches back to the changed files.
 - `:Critique viewed` marks a file viewed (✓ in the file list, with a count) and moves on to the next one.
-  A viewed file that changes shows ● until you look again. On GitHub it's the same "Viewed" checkbox
-  as on the website.
+  A viewed file that changes afterwards shows ● until you mark it viewed again. On GitHub it's the same
+  "Viewed" checkbox as on the website.
 - `:Critique since` shows only what changed since your last review: new commits since your last GitHub
   review, or what the agent changed since your last submit.
 - `:Critique overview` shows what the review is about: the PR's description, checks, and conversation,
@@ -263,7 +263,7 @@ Neovim, so an agent can't get stuck in it. The [skill](skills/critique/SKILL.md)
 ### 1. Requirements
 
 - Neovim **0.11+**
-- `git`
+- git **2.31+**
 - For GitHub PRs only: the [GitHub CLI](https://cli.github.com) (`brew install gh`), logged in with
   `gh auth login`. critique uses gh to fetch PRs, clone private repos, and post comments, so it
   doesn't need its own token. For **GitHub Enterprise Server**, log in to your company's host once:

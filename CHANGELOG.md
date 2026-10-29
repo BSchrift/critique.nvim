@@ -6,6 +6,17 @@ lazy.nvim, `version = '*'` follows them.
 
 ## [Unreleased]
 
+### Removed
+
+- The LuaRocks workflow. The `critique` command it would have installed couldn't find critique's Lua files,
+  so it never published a release.
+
+### Fixed
+
+- `critique -h` and the agent skill showed an invalid review handle (`promo-codes-7k2f`).
+- The README says critique needs git 2.31 or newer, and that ● stays on a viewed file until you mark it
+  viewed again.
+
 ## [0.8.0] - 2026-10-28
 
 ### Added
