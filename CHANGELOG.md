@@ -6,6 +6,8 @@ lazy.nvim, `version = '*'` follows them.
 
 ## [Unreleased]
 
+## [0.10.0] - 2026-10-29
+
 ### Added
 
 - When someone pushes to a PR while you review it, critique notices on your next save (or
@@ -265,6 +267,7 @@ First release.
 - Live reviews: the agent picks up each comment as you save it.
 - `:help critique`, `:Critique help`, and `critique -h`.
 
+[0.10.0]: https://github.com/BSchrift/critique.nvim/compare/v0.9.0...v0.10.0
 [0.9.0]: https://github.com/BSchrift/critique.nvim/compare/v0.8.0...v0.9.0
 [0.8.0]: https://github.com/BSchrift/critique.nvim/compare/v0.7.0...v0.8.0
 [0.7.0]: https://github.com/BSchrift/critique.nvim/compare/v0.6.0...v0.7.0
