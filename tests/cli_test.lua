@@ -168,6 +168,16 @@ for _, case in ipairs({
     H.has(r.err, case[2])
   end)
 end
+H.test('a thread on a repeated line stays on its own copy when code is added above it', function()
+  local root = setup()
+  local both = { 'func A() error {', '\terr := a()', '\treturn err', '}', 'func B() error {', '\terr := b()', '\treturn err', '}' }
+  H.write(root, 'f.go', both)
+  H.run(root, { 'comment', 'f.go:7', "B's error needs context" })
+  table.insert(both, 5, '// four new lines, so A\'s copy is as near to line 7 as B\'s')
+  for _ = 1, 3 do table.insert(both, 5, '') end
+  H.write(root, 'f.go', both)
+  H.has(H.run(root, { 'list' }), '#1 open · f.go:11')
+end)
 
 H.section('list / show')
 H.test('--json is the whole review', function()

@@ -269,9 +269,11 @@ function C.comment(o)
     or error(('%s does not exist in the %s version'):format(path, side == 'old' and 'base' or 'current'), 0)
   l1, l2 = tonumber(l1), tonumber(l2 ~= '' and l2 or l1)
   if l1 < 1 or l2 < l1 or l2 > #lines then error(('lines %d-%d are outside %s (1-%d)'):format(l1, l2, path, #lines), 0) end
-  local id = store.new_id()
+  local id, code = store.new_id(), vim.list_slice(lines, l1, l2)
+  local before, after -- only threads on the current version move with the code
+  if side == 'new' then before, after = store.context(lines, code, l2) end
   store.append(log, { type = 'comment', id = id, thread = id, author = author(o, r), role = 'agent', path = path, side = side,
-    line = l2, start_line = l1 < l2 and l1 or nil, code = vim.list_slice(lines, l1, l2), body = text(o, 2) })
+    line = l2, start_line = l1 < l2 and l1 or nil, code = code, before = before, after = after, body = text(o, 2) })
   for _, t in ipairs(store.load(log, 'agent').threads) do
     if t.id == id then out(('Created #%d on %s:%s.'):format(t.n, path, l1 < l2 and (l1 .. '-' .. l2) or l1)) end
   end

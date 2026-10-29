@@ -59,8 +59,18 @@ function M.new_id()
   return 'c-' .. rand(5)
 end
 
--- Where a block of code (ending at `line`) is now, or nil if it is gone: same place, else the nearest exact match.
-function M.relocate(lines, code, line)
+-- The lines just above and below a block of code (ending at `last`), saved with a thread so that relocate can
+-- tell copies of the block apart. Nothing if `lines` doesn't have the block there.
+function M.context(lines, code, last)
+  local first = last - #code + 1
+  if not vim.deep_equal(vim.list_slice(lines, first, last), code) then return end
+  return vim.list_slice(lines, first - 2, first - 1), vim.list_slice(lines, last + 1, last + 2)
+end
+
+-- Where a block of code (ending at `line`) is now, or nil if it is gone. The nearest copy whose surrounding lines
+-- (`before`, `after`, from M.context) still match; else the same place; else the only copy. With several copies
+-- and none of that to go on, nil: better outdated than on the wrong line. (Without context: the nearest copy.)
+function M.relocate(lines, code, line, before, after)
   local n = #code
   local function at(e)
     for i = 1, n do
@@ -68,12 +78,26 @@ function M.relocate(lines, code, line)
     end
     return true
   end
-  if line <= #lines and at(line) then return line end
-  local best
-  for e = n, #lines do
-    if at(e) and (not best or math.abs(e - line) < math.abs(best - line)) then best = e end
+  local function fits(e)
+    for i, l in ipairs(before or {}) do
+      if lines[e - n - #before + i] ~= l then return false end
+    end
+    for i, l in ipairs(after or {}) do
+      if lines[e + i] ~= l then return false end
+    end
+    return true
   end
-  return best
+  local function nearer(e, than) return not than or math.abs(e - line) < math.abs(than - line) end
+  local best, only, copies = nil, nil, 0
+  for e = n, #lines do
+    if at(e) then
+      copies, only = copies + 1, e
+      if fits(e) and nearer(e, best) then best = e end
+    end
+  end
+  if best then return best end
+  if line <= #lines and at(line) then return line end
+  return copies == 1 and only or nil
 end
 
 -- Renames between the base and the working tree, both ways. Threads always use the current path, like GitHub.
@@ -180,7 +204,8 @@ function M.load(log, viewer)
       if ev.thread == ev.id and inside then
         threads[ev.id] = {
           id = ev.id, n = #review.threads + 1, path = ev.path, side = ev.side, line = ev.line,
-          start_line = ev.start_line, orig_line = ev.line, code = ev.code, resolved = false, comments = {},
+          start_line = ev.start_line, orig_line = ev.line, code = ev.code, before = ev.before, after = ev.after,
+          resolved = false, comments = {},
         }
         table.insert(review.threads, threads[ev.id])
       end
@@ -237,7 +262,7 @@ function M.load(log, viewer)
       -- The file was renamed since the comment: follow it.
       if not vim.uv.fs_stat(review.root .. '/' .. t.path) then t.path = M.current_path(review, t.path) end
       files[t.path] = files[t.path] or M.file_lines(review, t.path, 'new') or {}
-      local now = M.relocate(files[t.path], t.code, t.orig_line)
+      local now = M.relocate(files[t.path], t.code, t.orig_line, t.before, t.after)
       if now and t.start_line then t.start_line = t.start_line + now - t.orig_line end
       t.line, t.outdated = now, now == nil
     end

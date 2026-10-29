@@ -23,6 +23,9 @@ lazy.nvim, `version = '*'` follows them.
   changes, instead of every second.
 - Comment ids in local reviews were short enough to collide (about a 3% chance in a review with 1,000
   comments), and then deleting one comment could delete another. New ids are longer (`c-a35698f2c1`).
+- In local reviews, a thread on a line that appears more than once (`return err`) could jump to another copy
+  of it when code was added above. New threads remember the lines around them and stay on their own copy;
+  when it can't tell the copies apart, the thread shows as outdated instead of on the wrong line.
 
 ## [0.8.0] - 2026-10-28
 

@@ -456,6 +456,7 @@ local function post(ctx, body)
       if not ctx.thread then
         local a = ctx.anchor
         ev.path, ev.side, ev.line, ev.start_line, ev.code = a.path, a.side == 'LEFT' and 'old' or 'new', a.line, a.startLine, ctx.code
+        if ev.side == 'new' then ev.before, ev.after = store.context(store.file_lines(S.review, ev.path, 'new') or {}, ev.code, ev.line) end
       end
       store.append(S.log, ev)
       ctx.comment = { id = ev.id }
