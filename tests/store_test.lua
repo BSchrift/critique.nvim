@@ -640,6 +640,27 @@ H.test('a review committed to the repo is not listed, and opening it by id is re
   H.eq(#store.list(root), 0)
   H.has(H.errors(store.find, id, root), 'committed to this repo')
 end)
+H.test('a committed review in another capitalisation is refused too (one folder on macOS)', function()
+  local root = H.repo({ ['f.txt'] = { 'one' } })
+  local log = store.start(root, { title = 'planted' })
+  local id = store.load(log, 'human').id
+  -- What checking out .critique/Reviews/<id>.jsonl leaves on a case-insensitive disk, on any disk.
+  local blob = H.git(root, 'hash-object', '-w', log)
+  H.git(root, 'update-index', '--add', '--cacheinfo', '100644,' .. blob .. ',.critique/Reviews/' .. id .. '.jsonl')
+  H.git(root, 'commit', '-qm', 'a review someone else wrote')
+  H.eq(#store.list(root), 0)
+  H.has(H.errors(store.find, id, root), 'committed to this repo')
+end)
+H.test('reviews behind a symlinked .critique or reviews folder are refused', function()
+  for _, link in ipairs({ '.critique', '.critique/reviews' }) do
+    local root = H.repo({ ['f.txt'] = { 'one' } })
+    local id = store.load(store.start(root, { title = 'planted' }), 'human').id
+    vim.uv.fs_rename(root .. '/' .. link, root .. '/elsewhere')
+    vim.uv.fs_symlink(link == '.critique' and 'elsewhere' or '../elsewhere', root .. '/' .. link)
+    H.eq(#store.list(root), 0, link)
+    H.has(H.errors(store.find, id, root), 'committed to this repo')
+  end
+end)
 H.test('threads on files outside the checkout are dropped', function()
   local _, log = new_review()
   for _, path in ipairs({ '../../etc/hosts', '/etc/hosts', 'a/../../b', 'f.txt', 'two..dots.txt' }) do

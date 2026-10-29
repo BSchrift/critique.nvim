@@ -297,18 +297,27 @@ local function worktrees(cwd)
   return roots
 end
 
--- Open reviews in this repo (all of its worktrees), or only in the checkout at `root` if given.
 -- A review log that git tracks came with the repo: whoever committed it wrote its "human" comments, which could
 -- tell an agent to do anything. critique's own logs are never committed (.critique/.gitignore ignores them).
-local function committed(root, id)
-  return vim.system({ 'git', '-C', root, 'ls-files', '--error-unmatch', '--', '.critique/reviews/' .. id .. '.jsonl' }):wait().code == 0
+-- Any capitalisation counts (macOS and Windows ignore case), and so does a symlinked folder, which can lead to
+-- tracked files anywhere. Returns a check by review id, for the checkout at `root`.
+local function committed(root)
+  for _, dir in ipairs({ '/.critique', '/.critique/reviews' }) do
+    if (vim.uv.fs_lstat(root .. dir) or {}).type == 'link' then return function() return true end end
+  end
+  local tracked = {}
+  local r = vim.system({ 'git', '-C', root, 'ls-files', '-z', '--', ':(icase).critique/reviews' }):wait()
+  for _, path in ipairs(vim.split(r.stdout or '', '\0', { trimempty = true })) do tracked[path:lower()] = true end
+  return function(id) return tracked[('.critique/reviews/' .. id .. '.jsonl'):lower()] == true end
 end
 
+-- Open reviews in this repo (all of its worktrees), or only in the checkout at `root` if given.
 function M.list(cwd, root)
   local found = {}
   for _, wt in ipairs(root and { root } or worktrees(cwd)) do
+    local is_committed = committed(wt)
     for name, kind in vim.uv.fs_stat(reviews_dir(wt)) and vim.fs.dir(reviews_dir(wt)) or function() end do
-      if kind == 'file' and name:match('%.jsonl$') and not committed(wt, name:sub(1, -7)) then
+      if kind == 'file' and name:match('%.jsonl$') and not is_committed(name:sub(1, -7)) then
         local ok, review = pcall(M.load, reviews_dir(wt) .. '/' .. name, 'human')
         if ok and not review.closed then found[#found + 1] = review end
       end
@@ -335,7 +344,7 @@ function M.find(handle, cwd)
   for _, root in ipairs(roots) do
     local log = reviews_dir(root) .. '/' .. id .. '.jsonl'
     if vim.uv.fs_stat(log) then
-      if committed(root, id) then
+      if committed(root)(id) then
         error(('review %s is committed to this repo, so someone else wrote it; critique only opens reviews made here'):format(id), 0)
       end
       return log, n

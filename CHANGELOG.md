@@ -6,6 +6,12 @@ lazy.nvim, `version = '*'` follows them.
 
 ## [Unreleased]
 
+### Fixed
+
+- Security: a review log committed to a repo could still reach your agent: in another capitalisation
+  (`.critique/Reviews/`, the same folder on macOS), or behind a symlinked `.critique` or `reviews` folder.
+  Those are ignored now too.
+
 ## [0.8.0] - 2026-10-28
 
 ### Added
