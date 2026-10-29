@@ -6,6 +6,12 @@ lazy.nvim, `version = '*'` follows them.
 
 ## [Unreleased]
 
+### Fixed
+
+- A comment you started before reopening the same PR or review couldn't be saved: `:w` said its review was
+  no longer open. It saves now. A new comment on a PR that got new commits meanwhile is refused instead,
+  since its line may have moved.
+
 ## [0.8.0] - 2026-10-28
 
 ### Added

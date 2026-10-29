@@ -482,9 +482,13 @@ local function save(buf, ctx)
   if not at then error('keep the "<!-- ▼ write below … ▼ -->" line; your comment goes below it', 0) end
   local body = vim.trim(table.concat(lines, '\n', at + 1))
   if body == '' then error('comment is empty; nothing saved', 0) end
-  if ctx.review ~= S then
+  local from = ctx.review -- reopening a review makes a new S: the same review is the same log, or the same PR
+  if from ~= S and not (from.log and from.log == S.log or from.pr_id and from.host == S.host and from.pr_id == S.pr_id) then
     error(('this comment is for %s, which is no longer open: reopen it to save this comment, or :q! to drop it')
-      :format(ctx.review.title), 0)
+      :format(from.title), 0)
+  end
+  if ctx.anchor and from.head ~= S.head then -- its line number is in the PR as it was
+    error("the PR has new commits since you started this comment, so its line may have moved: copy your text, :q!, and comment again", 0)
   end
   local reopens = post(ctx, body)
   if vim.api.nvim_buf_is_valid(buf) then vim.bo[buf].modified = false end
