@@ -14,6 +14,9 @@ lazy.nvim, `version = '*'` follows them.
 - After `y` on a suggestion, typing while it posted could overwrite a line, leave the suggested text in the
   file (so the next `:w` posted it again), and mark the file saved. critique now waits for the post
   (usually under a second), as comment saves do.
+- On a PR with more than 100 threads, the newest didn't show, so a comment you saved vanished and
+  commenting on its line started a second thread. On a PR with more than 100 files, viewed marks
+  past the 100th were lost. critique now loads all of them.
 
 ## [0.8.0] - 2026-10-28
 

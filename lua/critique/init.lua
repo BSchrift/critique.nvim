@@ -32,20 +32,22 @@ local function signed(body) return M.config.footer and body .. FOOTER or body en
 -- ...and as critique shows it, without (anyone's, any version's), so editing never stacks a second one.
 local function unsigned(body) return (body:gsub('%s*<sub>[^\n]*critique%.nvim[^\n]*</sub>%s*$', '')) end
 
--- shortcut: first 100 threads, 100 comments per thread, and 100 files' viewed marks; paginate if PRs outgrow that.
+-- Files and threads come 100 a page (fetch_pr asks for the rest).
+-- shortcut: 100 comments per thread, and your last review among the last 100; paginate if PRs outgrow that.
 local PR_QUERY = [[
-query($owner: String!, $name: String!, $number: Int!) {
+query($owner: String!, $name: String!, $number: Int!, $files: String, $reviewThreads: String) {
   repository(owner: $owner, name: $name) {
     pullRequest(number: $number) {
       id title headRefOid baseRefOid
       reviews(states: PENDING, first: 1) { nodes { id } }
       submitted: reviews(last: 100, states: [APPROVED, CHANGES_REQUESTED, COMMENTED, DISMISSED]) { nodes { viewerDidAuthor commit { oid } } }
-      files(first: 100) { nodes { path viewerViewedState } }
-      reviewThreads(first: 100) {
+      files(first: 100, after: $files) { nodes { path viewerViewedState } pageInfo { hasNextPage endCursor } }
+      reviewThreads(first: 100, after: $reviewThreads) {
         nodes {
           id isResolved isOutdated path line originalLine diffSide
           comments(first: 100) { nodes { id databaseId body state viewerDidAuthor author { login } } }
         }
+        pageInfo { hasNextPage endCursor }
       }
     }
   }
@@ -235,7 +237,16 @@ local function read_base(buf)
 end
 
 local function fetch_pr(st)
-  local pr = gh.gql(st.host, PR_QUERY, { owner = st.owner, name = st.name, number = st.number }).repository.pullRequest
+  local vars, more, pr = { owner = st.owner, name = st.name, number = st.number }, { files = true, reviewThreads = true }, nil
+  while next(more) do -- the next page of each list that has one; a finished list is asked for after its end (empty)
+    local page = gh.gql(st.host, PR_QUERY, vars).repository.pullRequest
+    pr = pr or vim.tbl_extend('force', page, { files = { nodes = {} }, reviewThreads = { nodes = {} } })
+    for key in pairs(more) do
+      vim.list_extend(pr[key].nodes, page[key].nodes)
+      vars[key] = page[key].pageInfo.endCursor or vars[key]
+      more[key] = page[key].pageInfo.hasNextPage or nil
+    end
+  end
   st.pr_id, st.review_id = pr.id, (pr.reviews.nodes[1] or {}).id
   st.viewed = {}
   for _, f in ipairs(pr.files.nodes) do st.viewed[f.path] = ({ VIEWED = 'viewed', DISMISSED = 'changed' })[f.viewerViewedState] end

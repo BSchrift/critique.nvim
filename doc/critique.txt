@@ -280,9 +280,8 @@ group in your config, e.g. >lua
   of context, rename detection, Myers algorithm. Your git config can't change
   the hunks.
 - Comments go through GitHub's GraphQL API via `gh api graphql`.
-- Loads up to 100 threads per PR, 100 comments per thread, and viewed marks
-  for 100 files. Outdated threads (on code that has since changed) stay at
-  the line they were on, marked outdated.
+- Loads up to 100 comments per thread. Outdated threads (on code that has
+  since changed) stay at the line they were on, marked outdated.
 - |:Critique-since| diffs the commit your last review was on against the PR
   head. In a local review, `:Critique submit` saves a snapshot of the working
   tree as git objects (through a temporary index; your staging area and

@@ -59,14 +59,23 @@ local OLD_FOOTERS = { -- earlier versions' footers, which critique hides too
   '\n\n<sub>Made with [critique.nvim](https://github.com/BSchrift/critique.nvim)</sub>',
   '\n\n<sub><a href="https://github.com/BSchrift/critique.nvim"><img src="https://raw.githubusercontent.com/BSchrift/critique.nvim/main/assets/icon-512.png" height="14" alt=""></a> Made with [critique.nvim](https://github.com/BSchrift/critique.nvim)</sub>',
 }
-local threads, overview, reviewed = {}, nil, nil -- "GitHub's" PR threads, overview, and the commit of your last review
+-- "GitHub's" PR threads, files' viewed states, overview, and the commit of your last review
+local threads, files, overview, reviewed = {}, {}, nil, nil
+local pages = 0 -- PR queries answered
+-- A GitHub list, 100 a page: the page after cursor `after`. Past the end, it's empty and has no cursor.
+local function page(nodes, after)
+  local from = tonumber(after) or 0
+  local last = math.min(#nodes, from + 100)
+  return { nodes = vim.list_slice(nodes, from + 1, last), pageInfo = { hasNextPage = last < #nodes, endCursor = last > from and tostring(last) or nil } }
+end
 gh.gql = function(_, query, vars)
   if query:find('statusCheckRollup') then return { repository = { pullRequest = overview } } end
   assert(query:find('reviewThreads'), 'unexpected query')
+  pages = pages + 1
   local repo = origins[vars.name]
   return { repository = { pullRequest = {
     id = 'PR_' .. vars.number, title = 'Change two', headRefOid = H.git(repo, 'rev-parse', 'pr'), baseRefOid = H.git(repo, 'rev-parse', 'main'),
-    reviews = { nodes = {} }, files = { nodes = {} }, reviewThreads = { nodes = vim.deepcopy(threads) },
+    reviews = { nodes = {} }, files = page(files, vars.files), reviewThreads = page(vim.deepcopy(threads), vars.reviewThreads),
     submitted = { nodes = reviewed and { { viewerDidAuthor = true, commit = { oid = reviewed } } } or {} },
   } } }
 end
@@ -382,6 +391,31 @@ H.test('y posts before you can type again: the file is back as it was, and a sec
   H.wait_for(function() return #messages > before end, 'the second :w')
   H.has(messages[#messages].msg, 'no edits to suggest in a.txt')
   H.eq(vim.tbl_map(function(m) return m[1] end, vim.list_slice(sent, count + 1)), { 'addPullRequestReview', 'addPullRequestReviewThread' })
+end)
+
+H.section('big PRs')
+H.test('every thread and viewed mark arrives, past the first 100', function()
+  local many = {}
+  for i = 1, 250 do
+    many[i] = { id = 'T_' .. i, isResolved = false, isOutdated = false, path = 'a.txt', line = 3, diffSide = 'RIGHT', comments = { nodes = {
+      { id = 'C_' .. i, databaseId = i, body = 'Thread ' .. i, state = 'SUBMITTED', viewerDidAuthor = false, author = { login = 'amy' } },
+    } } }
+  end
+  for i = 1, 149 do files[i] = { path = ('other%d.txt'):format(i), viewerViewedState = 'UNVIEWED' } end
+  files[150] = { path = 'a.txt', viewerViewedState = 'VIEWED' }
+  pages = 0
+  local ok, err = pcall(function()
+    open(many)
+    H.eq(pages, 3, '250 threads are 3 pages')
+    H.has(vim.fn.getqflist({ title = 0 }).title, '1/1 viewed')
+    vim.cmd('Critique threads')
+    H.wait_for(function() return vim.fn.getqflist({ title = 0 }).title:find('open threads') end, 'the thread list')
+    local seen = {}
+    for _, item in ipairs(vim.fn.getqflist()) do seen[tonumber(item.text:match('Thread (%d+)'))] = true end
+    H.eq({ vim.tbl_count(seen), seen[250] }, { 250, true }, 'each thread once, the newest too')
+  end)
+  files = {}
+  assert(ok, err)
 end)
 
 H.done()

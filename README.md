@@ -448,8 +448,7 @@ itself: reading and commenting on code you can navigate like any other.
 
 ## Limits
 
-- GitHub: loads up to 100 review threads per PR, 100 comments per thread, and viewed marks for 100 files.
-  The overview shows the last 100 comments and checks.
+- GitHub: loads up to 100 comments per thread. The overview shows the last 100 comments and checks.
 - Local `:Critique since` snapshots are git objects nothing points to, so `git gc` may delete them after
   about two weeks. Submit again to take a new one.
 - In local reviews, a binary file that changes after you mark it viewed keeps its ✓.
