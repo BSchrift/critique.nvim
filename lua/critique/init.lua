@@ -23,9 +23,10 @@ local MARK = { github = '<!-- ▼ write below · :w saves to your pending review
   live = '<!-- ▼ write below · :w sends it to the agent · :q closes ▼ -->' }
 local S -- the open review
 
-local FOOTER = '\n\n<sub><a href="https://github.com/BSchrift/critique.nvim"><img src="'
-  .. 'https://raw.githubusercontent.com/BSchrift/critique.nvim/main/assets/icon-512.png" height="14" alt=""></a> '
-  .. 'Made with [critique.nvim](https://github.com/BSchrift/critique.nvim)</sub>'
+-- "Made with critique.nvim", with the logo as the c. Its alt text is the c, so a blocked image still reads right.
+local FOOTER = '\n\n<sub>Made with <a href="https://github.com/BSchrift/critique.nvim"><img src="'
+  .. 'https://raw.githubusercontent.com/BSchrift/critique.nvim/main/assets/icon-512.png" height="14" align="texttop" '
+  .. 'alt="c">ritique.nvim</a></sub>'
 -- A GitHub comment as you post it, with the footer (config.footer)...
 local function signed(body) return M.config.footer and body .. FOOTER or body end
 -- ...and as critique shows it, without (anyone's, any version's), so editing never stacks a second one.

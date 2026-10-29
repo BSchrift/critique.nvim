@@ -4,12 +4,17 @@ All notable changes to critique.nvim. The format follows [Keep a Changelog](http
 and versions follow [Semantic Versioning](https://semver.org/). Releases are git tags (`v0.2.0`); with
 lazy.nvim, `version = '*'` follows them.
 
-## [Unreleased]
+## [0.8.0] - 2026-10-28
 
 ### Added
 
 - `:checkhealth critique` shows the installed version, and says to restart Neovim when critique was
   updated after this Neovim loaded it (the old version keeps running until then).
+
+### Changed
+
+- The footer on GitHub comments reads "Made with critique.nvim" with the logo as the c, all one link.
+  If the image is blocked, its alt text is the c. It stays on by default; `footer = false` turns it off.
 
 ### Fixed
 
@@ -189,6 +194,7 @@ First release.
 - Live reviews: the agent picks up each comment as you save it.
 - `:help critique`, `:Critique help`, and `critique -h`.
 
+[0.8.0]: https://github.com/BSchrift/critique.nvim/compare/v0.7.0...v0.8.0
 [0.7.0]: https://github.com/BSchrift/critique.nvim/compare/v0.6.0...v0.7.0
 [0.6.0]: https://github.com/BSchrift/critique.nvim/compare/v0.5.0...v0.6.0
 [0.5.0]: https://github.com/BSchrift/critique.nvim/compare/v0.4.0...v0.5.0

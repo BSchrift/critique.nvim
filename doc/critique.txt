@@ -48,7 +48,7 @@ the agent skill. >vim
 ==============================================================================
 2. Quick start                                           *critique-quickstart*
 
-From the shell, with the `critique` launcher on your PATH (see the README): >sh
+From the shell, with the `critique` command on your PATH (see the README): >sh
     critique https://github.com/owner/repo/pull/123
 <
 Or from inside Neovim: >vim
@@ -68,7 +68,7 @@ Until you submit, comments are a pending review: saved on GitHub, visible
 only to you. Quit any time and run the same command to continue.
 
 ==============================================================================
-3. Commands                                     *:Critique* *critique-commands*
+3. Commands                                    *:Critique* *critique-commands*
 
 `:Critique` with no subcommand is `:Critique comment` while a review is open
 (on the cursor line, or the lines selected), and this help otherwise.
@@ -199,9 +199,9 @@ Write your comment below it. `:w` saves it to your pending review on GitHub
 (in a local review: a draft the agent sees after `:Critique submit`); saving
 again updates the same comment. `:q` closes the buffer.
 
-On GitHub, the comment ends with a small logo and "Made with critique.nvim"
-(|critique-config| turns it off). critique hides it when it shows comments,
-so it is never in the buffer you edit.
+On GitHub, the comment ends with a small "Made with critique.nvim", the logo
+as its c (|critique-config| turns it off). critique hides it when it shows
+comments, so it is never in the buffer you edit.
 
 On GitHub PRs, you can only comment on lines inside a diff hunk: changed
 lines plus up to 3 lines of context around them. Their line numbers are
@@ -292,7 +292,7 @@ group in your config, e.g. >lua
   written.
 
 ==============================================================================
-9. Troubleshooting                                   *critique-troubleshooting*
+9. Troubleshooting                                  *critique-troubleshooting*
 
 Start with `:checkhealth critique`: it checks your setup and says what to fix.
 
@@ -355,12 +355,14 @@ The loop ~
    changed this round; |:Critique-overview| has every submit summary.
 5. Repeat until you submit with nothing left open.
 
-Agents learn this from the critique skill. See the README for installing it
-in Claude Code, Codex, Cursor, and other agents. The skill also has an agent
-end the commits of work you reviewed with a `Developed-with: critique` trailer
-linking here, unless you or the repo's instructions say not to add trailers. `critique -h` lists the
-shell commands: start, ls, status, list, show, diff, comment, reply,
-resolve, unresolve, edit, delete, submit, wait, watch, ack, close.
+Agents learn this from the critique skill. In Claude Code, install it with
+`/plugin install critique --marketplace BSchrift/critique.nvim`; the README
+has the setup for Codex, Cursor, and other agents. The skill also has an
+agent end the commits of work you reviewed with a `Developed-with: critique`
+trailer linking here, unless you or the repo's instructions say not to add
+trailers. `critique -h` lists the shell commands: start, ls, status, list,
+show, diff, comment, reply, resolve, unresolve, edit, delete, submit, wait,
+watch, ack, close.
 
 You can also start a review yourself: `critique` (or `:Critique open`) in a
 repo with no review opens a new one of the branch's changes.
@@ -460,7 +462,8 @@ auto_suggest        (default: true)
 
 footer              (default: true)
     Comments, suggestions, and review summaries you post on GitHub end with
-    a small logo and "Made with critique.nvim", linking to the plugin.
+    a small "Made with critique.nvim", the logo as its c, linking to the
+    plugin.
     critique hides it when it shows comments (yours and others'), so editing
     a comment never adds a second one. Local reviews never have it.
 
