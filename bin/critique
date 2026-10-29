@@ -21,8 +21,6 @@ HELP
     NVIM_LOG_FILE="${NVIM_LOG_FILE:-/dev/null}" nvim -l "$plugin/lua/critique/cli.lua" --help
     printf '\nInside Neovim: :Critique help, or :help critique.\n'
     exit 0 ;;
-  start|ls|status|list|show|diff|comment|reply|resolve|unresolve|edit|delete|submit|wait|ack|watch|close|-*)
-    cli "$@" ;;
 esac
 # Not a terminal (an agent's shell, a script): never start an interactive Neovim. The CLI explains instead.
 [ -t 0 ] && [ -t 1 ] || cli "$@"
@@ -32,6 +30,6 @@ case "$1" in
     command -v gh >/dev/null || { echo "critique needs the GitHub CLI: https://cli.github.com" >&2; exit 1; }
     host=$(printf '%s' "$1" | sed -E 's#^https?://([^/]+)/.*#\1#')
     gh auth status --hostname "$host" >/dev/null 2>&1 || gh auth login --hostname "$host" || exit 1 ;;
-  *) cli "$@" ;; # a typo of a command: let the CLI say so
+  *) cli "$@" ;; # a command (or a typo of one: the CLI says so)
 esac
 exec nvim -c "Critique open $1"
