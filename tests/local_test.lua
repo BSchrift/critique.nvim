@@ -1370,7 +1370,7 @@ H.test('checks Neovim and git, and flags options setup() does not know', functio
     H.has(text, 'OK Neovim ' .. tostring(vim.version()))
     H.has(text, 'OK git ')
     H.has(text, 'unknown option "autosuggest" in setup()')
-    H.has(text, 'critique.nvim v')
+    H.ok(text:find('\n%- critique%.nvim %S+'), 'the version (a tag, or the commit in a checkout without tags)')
     H.lacks(text, 'Failed to run healthcheck')
     H.lacks(text, 'old version is still running')
     vim.cmd('tabclose')
