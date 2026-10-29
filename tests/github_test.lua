@@ -218,6 +218,20 @@ H.test(':Critique since downloads the commit of your last review the same way', 
   reviewed = nil
   assert(ok, err)
 end)
+H.test("the files' ids go to git in one piece, not one write per file", function()
+  local system, stdin = vim.system, nil
+  vim.system = function(cmd, opts, ...)
+    if vim.tbl_contains(cmd, '--stdin') then stdin = opts.stdin end
+    return system(cmd, opts, ...)
+  end
+  local ok, err = pcall(open, nil, URL8)
+  vim.system = system
+  assert(ok, err)
+  H.eq(type(stdin), 'string')
+  local ids = {}
+  for id in H.git(origin8, 'ls-tree', '-r', 'pr'):gmatch(' blob (%x+)\t') do ids[#ids + 1] = id end
+  H.eq(stdin, table.concat(ids, '\n') .. '\n')
+end)
 H.test('a failed download stops the progress line and says why', function()
   echoes = {}
   local before = #messages

@@ -396,7 +396,9 @@ local function fetch_files(git_dir, rev, on_progress)
   local ids = {}
   for id in gh.git(git_dir, 'ls-tree', '-r', rev):gmatch(' blob (%x+)\t') do ids[#ids + 1] = id end
   if #ids == 0 then return true end -- with nothing to ask for, git would fetch every branch
-  return gh.git_progress(git_dir, on_progress, { 'fetch', '--progress', '--no-tags', '--no-write-fetch-head', '--stdin', 'origin' }, ids)
+  -- One string: given a list, vim.system writes each id separately, which blocks Neovim for seconds in a monorepo.
+  return gh.git_progress(git_dir, on_progress, { 'fetch', '--progress', '--no-tags', '--no-write-fetch-head', '--stdin', 'origin' },
+    table.concat(ids, '\n') .. '\n')
 end
 
 local function must(ok, err)

@@ -20,6 +20,8 @@ lazy.nvim, `version = '*'` follows them.
 - Reopening a PR failed when a new file of yours in its checkout was in the way of its new commits. The
   stash now takes new files too. If the checkout still fails, the error says where your stashed edits
   went; it used to leave them in the stash without a word.
+- Opening a PR in a very big repo (a million files) froze Neovim for about 2 seconds while it asked git
+  for the files. It takes a few milliseconds now.
 
 ## [0.8.0] - 2026-10-28
 
