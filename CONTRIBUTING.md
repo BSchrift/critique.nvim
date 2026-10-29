@@ -1,7 +1,8 @@
 # Contributing
 
 Thanks for helping. Issues and pull requests are welcome; for a bigger change, open an issue or a
-discussion first so we can agree on the approach.
+discussion first so we can agree on the approach. Working with an AI agent? Point it at
+[AGENTS.md](AGENTS.md).
 
 ## Running the tests
 
