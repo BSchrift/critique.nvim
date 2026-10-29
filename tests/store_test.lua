@@ -585,6 +585,27 @@ H.test('find prefers the index over the worktrees', function()
   vim.fn.writefile(vim.fn.readfile(log_b), a .. '/.critique/reviews/' .. id .. '.jsonl')
   H.eq((store.find(id, a)), log_b)
 end)
+H.test("an id another repo already uses is never given to a new review", function()
+  local random = vim.uv.random
+  vim.uv.random = function(n) return ('\0'):rep(n) end -- the first try is always <slug>-0000
+  local ok, err = pcall(function()
+    local first = store.load(store.start(H.repo(), { title = 'clash' }), 'agent').id
+    local second = store.load(store.start(H.repo(), { title = 'clash' }), 'agent').id
+    H.eq({ first, second }, { 'clash-0000', 'clash-0002' })
+  end)
+  vim.uv.random = random
+  assert(ok, err)
+end)
+H.test("with an id two repos share (from before ids were unique), find opens this repo's review", function()
+  local a, b = H.repo(), H.repo()
+  local log_a = store.start(a, { title = 'x' })
+  local id = store.load(log_a, 'agent').id
+  local log_b = b .. '/.critique/reviews/' .. id .. '.jsonl' -- started later, in another repo, under the same id
+  vim.fn.mkdir(vim.fs.dirname(log_b), 'p')
+  vim.fn.writefile(vim.fn.readfile(log_a), log_b)
+  vim.fn.writefile({ id .. '\t' .. b }, vim.env.XDG_STATE_HOME .. '/critique/index', 'a')
+  H.eq({ store.find(id, a), store.find(id, b), store.find(id, H.tmp) }, { log_a, log_b, log_b })
+end)
 
 
 H.section('live reviews')

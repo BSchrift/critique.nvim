@@ -28,6 +28,9 @@ lazy.nvim, `version = '*'` follows them.
   when it can't tell the copies apart, the thread shows as outdated instead of on the wrong line.
 - A local review write that was cut short (a full disk, a crash) made the whole review unreadable, and
   the next comment was lost with it. The broken line is skipped now, and the next write starts a new line.
+- Two repos could have reviews with the same id, and then `-r <id>` (or `critique <id>`) could open the
+  other repo's review. New ids are unique across your repos, and an id two repos already share opens the
+  review in the repo you're in.
 
 ## [0.8.0] - 2026-10-28
 

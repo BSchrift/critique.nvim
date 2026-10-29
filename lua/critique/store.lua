@@ -310,10 +310,12 @@ function M.start(root, opts)
   if slug == '' then slug = slugify(vim.fs.basename(root)) end
   if slug == '' then slug = 'review' end
   vim.fn.mkdir(reviews_dir(root), 'p')
+  local indexed = {} -- ids in use in other repos too: `critique <id>` finds a review through the index
+  for _, line in ipairs(read_lines(index_path()) or {}) do indexed[line:match('^[^\t]*')] = true end
   local id
-  for attempt = 1, 100 do -- ids end in 4 random hex chars; never reuse an existing review's log
+  for attempt = 1, 100 do -- ids end in 4 random hex chars; never reuse an existing review's id
     id = slug .. '-' .. (attempt == 1 and rand(2) or ('%04x'):format((tonumber(rand(2), 16) + attempt) % 65536))
-    if not vim.uv.fs_stat(reviews_dir(root) .. '/' .. id .. '.jsonl') then break end
+    if not indexed[id] and not vim.uv.fs_stat(reviews_dir(root) .. '/' .. id .. '.jsonl') then break end
   end
   local ignore = root .. '/.critique/.gitignore'
   if not vim.uv.fs_stat(ignore) then vim.fn.writefile({ '*' }, ignore) end
@@ -396,11 +398,14 @@ function M.find(handle, cwd)
   if at ~= '' then
     roots = { M.git(at, 'rev-parse', '--show-toplevel') }
   else
+    local indexed, here = {}, worktrees(cwd)
     for _, line in ipairs(read_lines(index_path()) or {}) do
       local i, root = line:match('^([^\t]+)\t(.+)$')
-      if i == id then table.insert(roots, 1, root) end
+      if i == id then table.insert(indexed, 1, root) end -- the newest first
     end
-    vim.list_extend(roots, worktrees(cwd))
+    -- Where the index says, and of those, this repo's own first: older ids can be the same in two repos.
+    roots = vim.list_extend(vim.tbl_filter(function(root) return vim.tbl_contains(here, root) end, indexed), indexed)
+    vim.list_extend(roots, here)
   end
   for _, root in ipairs(roots) do
     local log = reviews_dir(root) .. '/' .. id .. '.jsonl'
