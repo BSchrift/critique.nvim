@@ -140,10 +140,12 @@ only to you. Quit any time and run the same command to continue.
     staging area). While it's on, the view follows new edits by the agent.
 
 :Critique overview                                       *:Critique-overview*
-    What the review is about, in a read-only buffer. GitHub: the PR's
-    branches, review status, checks (failing ones listed), description, and
-    conversation (comments and review summaries). Local review: its base,
-    whose turn it is, and every submit summary from you and the agent.
+    Go to the overview page, `critique://overview`, fetched afresh: what the
+    review is about, read-only. GitHub: the PR's branches, review status,
+    checks (failing ones listed), description, and conversation (comments
+    and review summaries). Local review: its base, whose turn it is, and
+    every submit summary from you and the agent. A PR opens on this page,
+    and it's the first entry in the PR's file list.
 
 :Critique threads                                         *:Critique-threads*
     List the open threads in the quickfix list, in file order, and go to the
@@ -157,7 +159,8 @@ only to you. Quit any time and run the same command to continue.
 
 :Critique files                                             *:Critique-files*
     Show the quickfix list of changed files again (after `:Critique
-    threads`, or when another quickfix list is in front).
+    threads`, or when another quickfix list is in front). On a PR, the
+    list starts with its overview page.
 
 :Critique refresh                                         *:Critique-refresh*
     Reload comments. In a local review, also recompute the diff and reload

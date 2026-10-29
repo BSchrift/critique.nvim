@@ -6,6 +6,17 @@ lazy.nvim, `version = '*'` follows them.
 
 ## [Unreleased]
 
+### Added
+
+- A PR opens on its overview page: the description, checks, review status, and conversation. It's the
+  first entry in the file list, so `:cnext` goes on to the changed files and `:cprev` comes back to it,
+  like a file. A link to a file, line, or comment still opens there.
+
+### Changed
+
+- `:Critique overview` goes to the overview page in the current window, fetched afresh, instead of
+  opening it in a new split.
+
 ## [0.10.0] - 2026-10-29
 
 ### Added

@@ -222,6 +222,35 @@ local function thread_items()
     .. (waiting == 0 and '' or waiting == 1 and ' · 1 needs your reply' or (' · %d need your reply'):format(waiting))
 end
 
+-- The overview page: what the review is about, and its conversation. A PR's file list starts with it.
+local OVERVIEW = 'critique://overview'
+
+-- Fills the overview page for the open review, fetched afresh.
+local function read_overview(buf)
+  vim.bo[buf].buftype, vim.bo[buf].swapfile, vim.bo[buf].filetype = 'nofile', false, 'markdown'
+  local function set(lines)
+    vim.bo[buf].modifiable = true
+    vim.api.nvim_buf_set_lines(buf, 0, -1, false, lines)
+    vim.bo[buf].modifiable, vim.bo[buf].modified = false, false
+  end
+  set({ '# ' .. S.title, '', '_Loading…_' })
+  local st = S
+  gh.async(function()
+    local lines, entries = st.backend.overview(st)
+    table.insert(lines, 1, '# ' .. st.title)
+    vim.list_extend(lines, { '', '## Conversation' })
+    if #entries == 0 then vim.list_extend(lines, { '', '_Nothing yet._' }) end
+    for _, e in ipairs(entries) do
+      vim.list_extend(lines, { '', ('### %s · %s'):format(e.who, e.at:sub(1, 10)) })
+      if e.body ~= '' then vim.list_extend(vim.list_extend(lines, { '' }), split(e.body)) end
+    end
+    if S == st and vim.api.nvim_buf_is_valid(buf) then set(lines) end
+  end)()
+end
+
+-- Where the changed files start in the file list: after a PR's overview page.
+local function first_file_item() return S.review and 1 or 2 end
+
 -- The review's quickfix list: changed files, or with :Critique threads, open threads. `reset` starts at the top.
 local function set_qf(reset)
   local items, title
@@ -247,6 +276,7 @@ local function set_qf(reset)
     for _, e in pairs(extra) do
       table.insert(items, { filename = e.filename, lnum = e.lnum, text = plural(e.count, 'thread') })
     end
+    if not S.review then table.insert(items, 1, { filename = OVERVIEW, lnum = 1, text = 'description, checks, and conversation' }) end
     local n, total = viewed_count()
     title = S.title .. (S.since and ' · since your last review' or '') .. (n > 0 and (' · %d/%d viewed'):format(n, total) or '')
   end
@@ -622,12 +652,15 @@ local function start(st)
   local group = vim.api.nvim_create_augroup('critique', {})
   vim.api.nvim_create_autocmd('BufReadPost', { group = group, callback = function(ev) decorate(ev.buf) end })
   vim.api.nvim_create_autocmd('BufReadCmd', { group = group, pattern = 'critique://base/*', callback = function(ev) read_base(ev.buf) end })
+  vim.api.nvim_create_autocmd('BufReadCmd', { group = group, pattern = OVERVIEW, callback = function(ev) read_overview(ev.buf) end })
   vim.api.nvim_create_autocmd('ColorScheme', { group = group, callback = set_highlights })
   set_highlights()
   vim.api.nvim_set_current_dir(S.dir)
   vim.cmd.checktime()
+  local page = vim.fn.bufnr(OVERVIEW)
+  if page ~= -1 and vim.api.nvim_buf_is_loaded(page) then read_overview(page) end -- still the last review's
   cmds.files()
-  if #S.files > 0 then vim.cmd.cfirst() end
+  if not S.review or #S.files > 0 then vim.cmd.cfirst() end -- a PR opens on its overview page
   redraw()
 end
 
@@ -773,7 +806,7 @@ function cmds.since()
   end
   open_list('files')
   redraw()
-  if S.since then vim.cmd.cfirst() end
+  if S.since then vim.cmd('cc ' .. first_file_item()) end
   notify(S.since and ('%s changed since your last review · :Critique since again shows all changes'):format(plural(#S.since.files, 'file'))
     or 'showing all changes')
 end
@@ -804,11 +837,12 @@ function cmds.viewed()
   for k = 1, #files do
     local i = (at + k - 1) % #files + 1
     if S.viewed[files[i].path] ~= 'viewed' then
-      if S.list == 'files' then vim.fn.setqflist({}, 'a', { id = S.qf_id, idx = i }) end -- so :cnext carries on from there
+      local item = i + first_file_item() - 1
+      if S.list == 'files' then vim.fn.setqflist({}, 'a', { id = S.qf_id, idx = item }) end -- so :cnext carries on from there
       if not in_list then
         show(files[i].path, first_change(files[i]))
       elseif S.list == 'files' then
-        vim.api.nvim_win_set_cursor(0, { i, 0 })
+        vim.api.nvim_win_set_cursor(0, { item, 0 })
       end
       break
     end
@@ -816,24 +850,16 @@ function cmds.viewed()
   notify(('%d/%d viewed'):format(n, total))
 end
 
--- What the review is about and its conversation, in a read-only markdown buffer.
+-- Goes to the overview page, fetched afresh.
 function cmds.overview()
-  local lines, entries = S.backend.overview(S)
-  table.insert(lines, 1, '# ' .. S.title)
-  vim.list_extend(lines, { '', '## Conversation' })
-  if #entries == 0 then vim.list_extend(lines, { '', '_Nothing yet._' }) end
-  for _, e in ipairs(entries) do
-    vim.list_extend(lines, { '', ('### %s · %s'):format(e.who, e.at:sub(1, 10)) })
-    if e.body ~= '' then vim.list_extend(vim.list_extend(lines, { '' }), split(e.body)) end
+  if vim.bo.buftype == 'quickfix' then vim.cmd.wincmd('p') end
+  local buf = vim.fn.bufnr(OVERVIEW)
+  if buf ~= -1 and vim.api.nvim_buf_is_loaded(buf) then
+    read_overview(buf)
+    vim.cmd.buffer(buf)
+  else
+    vim.cmd.edit(OVERVIEW)
   end
-  local old = vim.fn.bufnr('critique://overview')
-  if old ~= -1 then vim.api.nvim_buf_delete(old, { force = true }) end
-  vim.cmd('topleft new')
-  local buf = vim.api.nvim_get_current_buf()
-  vim.api.nvim_buf_set_name(buf, 'critique://overview')
-  vim.api.nvim_buf_set_lines(buf, 0, -1, false, lines)
-  vim.bo[buf].buftype, vim.bo[buf].bufhidden, vim.bo[buf].swapfile, vim.bo[buf].filetype = 'nofile', 'wipe', false, 'markdown'
-  vim.bo[buf].modifiable = false
 end
 
 function cmds.toggle()

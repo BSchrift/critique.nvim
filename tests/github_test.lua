@@ -60,7 +60,12 @@ local OLD_FOOTERS = { -- earlier versions' footers, which critique hides too
   '\n\n<sub><a href="https://github.com/BSchrift/critique.nvim"><img src="https://raw.githubusercontent.com/BSchrift/critique.nvim/main/assets/icon-512.png" height="14" alt=""></a> Made with [critique.nvim](https://github.com/BSchrift/critique.nvim)</sub>',
 }
 -- "GitHub's" PR threads, files' viewed states, overview, and the commit of your last review
-local threads, files, overview, reviewed = {}, {}, nil, nil
+local threads, files, reviewed = {}, {}, nil
+local function bare_overview(body) -- a PR with no checks or conversation
+  return { url = 'https://github.example/o/r/pull/7', body = body or '', state = 'OPEN', isDraft = false, baseRefName = 'main',
+    headRefName = 'pr', author = { login = 'me' }, commits = { nodes = {} }, comments = { nodes = {} }, reviews = { nodes = {} } }
+end
+local overview = bare_overview()
 local pages = 0 -- PR queries answered
 -- A GitHub list, 100 a page: the page after cursor `after`. Past the end, it's empty and has no cursor.
 local function page(nodes, after)
@@ -367,7 +372,6 @@ H.test("the overview doesn't show footers", function()
   H.has(text, '### amy · 2026-10-27\n\nShip it')
   H.lacks(text, 'critique.nvim')
   H.lacks(text, '### me', 'a review that was only a footer is a bare review')
-  vim.cmd('quit')
 end)
 
 H.section('a comment belongs to its PR')
@@ -615,7 +619,43 @@ H.test('the overview counts the checks that passed and lists the rest', function
     '- • deploy (in progress)',
     '',
   })
-  vim.cmd('quit')
+end)
+
+H.section('the overview page')
+local function page_text() return table.concat(vim.api.nvim_buf_get_lines(0, 0, -1, false), '\n') end
+H.test('a PR opens on its overview page, first in its file list; :cnext goes on to the files, and back', function()
+  overview = bare_overview('What this PR does')
+  open()
+  H.eq(vim.api.nvim_buf_get_name(0), 'critique://overview')
+  H.has(page_text(), '# #7 Change two\nme wants to merge `pr` into `main` · open')
+  H.has(page_text(), '## Description\n\nWhat this PR does')
+  local first = vim.fn.getqflist()[1]
+  H.eq({ vim.api.nvim_buf_get_name(first.bufnr), first.text }, { 'critique://overview', 'description, checks, and conversation' })
+  vim.cmd.cnext()
+  H.eq(vim.fn.fnamemodify(vim.api.nvim_buf_get_name(0), ':t'), 'a.txt')
+  vim.cmd.cprevious()
+  H.eq(vim.api.nvim_buf_get_name(0), 'critique://overview', 'back to it, like a file')
+end)
+H.test(':Critique overview goes there from anywhere, fetched afresh', function()
+  overview = bare_overview('Before')
+  open()
+  vim.cmd.cnext()
+  overview = bare_overview('Edited on GitHub')
+  vim.cmd('Critique overview')
+  H.wait_for(function() return page_text():find('Edited on GitHub', 1, true) end, 'the fresh overview')
+  H.eq(#vim.tbl_filter(function(b) return vim.api.nvim_buf_get_name(b) == 'critique://overview' end, vim.api.nvim_list_bufs()), 1)
+  overview = bare_overview()
+end)
+H.test("in a PR's file list, :Critique viewed moves on to the next file, past the overview", function()
+  H.write(origin, 'b.txt', { 'BEE' })
+  H.git(origin, 'commit', '-qam', 'b too')
+  H.git(origin, 'update-ref', 'refs/pull/7/head', 'pr')
+  open()
+  vim.cmd('copen')
+  vim.api.nvim_win_set_cursor(0, { 2, 0 }) -- a.txt
+  vim.cmd('Critique viewed')
+  H.wait_for(function() return vim.fn.line('.') == 3 end, 'the cursor on b.txt')
+  H.eq(vim.fn.getqflist({ idx = 0 }).idx, 3, ':cnext carries on from b.txt')
 end)
 
 H.done()

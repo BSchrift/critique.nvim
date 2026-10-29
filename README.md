@@ -60,7 +60,7 @@ suggestion with one click; an agent applies it as written. `:Critique suggest` d
 - `:Critique since` shows only what changed since your last review: new commits since your last GitHub
   review, or what the agent changed since your last submit.
 - `:Critique overview` shows what the review is about: the PR's description, checks, and conversation,
-  or the agent's submit summaries.
+  or the agent's submit summaries. A PR opens on it, as the first entry in its file list.
 - `:help critique`, `:Critique help`, and `critique -h`.
 
 **Reviewing your AI agent**
@@ -107,7 +107,9 @@ suggestion with one click; an agent applies it as written. `:Critique suggest` d
 - **Re-review fast.** `:Critique since` shows only the commits since your last review,
   `:Critique viewed` ticks files off (in sync with GitHub's "Viewed" checkbox), and `:Critique threads`
   lists the open threads to step through.
-- **PR overview.** `:Critique overview` shows the description, checks, review status, and conversation.
+- **PR overview.** A PR opens on its overview: the description, checks, review status, and
+  conversation. It's the first entry in the file list, so `:cprev` gets back to it; so does
+  `:Critique overview`.
 - **Before/after.** Switch any file to its pre-PR version at the same spot, or hide the diff
   overlay for a plain view.
 - **Share a line.** `:Critique link` copies a permalink to the line you're on.
@@ -129,7 +131,8 @@ about 15 seconds and 70 MB. Later opens only fetch what changed.
 
 Then:
 
-1. **Find your way around.** The changed files are in the quickfix list (`:cnext` / `:cprev`), and
+1. **Find your way around.** The PR opens on its overview page (description, checks, conversation).
+   It and the changed files are in the quickfix list (`:cnext` / `:cprev`), and
    `]c` / `[c` jump between changes in a file. You can open any other file with your usual tools.
    `:Critique viewed` marks a file viewed and takes you to the next one.
 2. **Comment.** Put the cursor on a line and run `:Critique comment`. A markdown buffer opens.
@@ -174,7 +177,8 @@ GitHub it's the same "Viewed" checkbox as on the website, and a file that change
 
 ![:Critique threads: the open threads, then resolving one](demo/clips/threads.gif)
 
-**The PR at a glance.** `:Critique overview` shows the description, the CI checks, and the conversation.
+**The PR at a glance.** A PR opens on its overview page: the description, the CI checks, and the
+conversation. It's first in the file list; `:Critique overview` also goes there, fetched afresh.
 
 ![:Critique overview: a PR's description, checks, and conversation](demo/clips/overview.gif)
 
