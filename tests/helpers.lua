@@ -14,6 +14,7 @@ vim.fn.writefile({ '[user]', '  name = Tester', '  email = tester@example.com', 
 vim.env.GIT_CONFIG_GLOBAL, vim.env.GIT_CONFIG_NOSYSTEM = H.tmp .. '/gitconfig', '1'
 vim.env.CRITIQUE_AS = nil
 
+io.stdout:setvbuf('line') -- each result as it happens, even if the run is stopped (tests/run.sh)
 local results = { passed = 0, failed = {} }
 local current
 
