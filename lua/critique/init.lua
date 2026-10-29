@@ -1,6 +1,7 @@
 local gh = require('critique.gh')
 local diff = require('critique.diff')
 local store = require('critique.store')
+local github = require('critique.github')
 
 local M = {}
 M.defaults = {
@@ -22,52 +23,6 @@ local MARK = { github = '<!-- ▼ write below · :w saves to your pending review
   ['local'] = '<!-- ▼ write below · :w saves a draft · :q closes ▼ -->',
   live = '<!-- ▼ write below · :w sends it to the agent · :q closes ▼ -->' }
 local S -- the open review
-
--- "Made with critique.nvim", with the logo as the c. Its alt text is the c, so a blocked image still reads right.
-local FOOTER = '\n\n<sub>Made with <a href="https://github.com/BSchrift/critique.nvim"><img src="'
-  .. 'https://raw.githubusercontent.com/BSchrift/critique.nvim/main/assets/icon-512.png" height="14" align="texttop" '
-  .. 'alt="c">ritique.nvim</a></sub>'
--- A GitHub comment as you post it, with the footer (config.footer)...
-local function signed(body) return M.config.footer and body .. FOOTER or body end
--- ...and as critique shows it, without (anyone's, any version's), so editing never stacks a second one.
-local function unsigned(body) return (body:gsub('%s*<sub>[^\n]*critique%.nvim[^\n]*</sub>%s*$', '')) end
-
--- Files and threads come 100 a page (fetch_pr asks for the rest).
--- shortcut: 100 comments per thread, and your last review among the last 100; paginate if PRs outgrow that.
-local PR_QUERY = [[
-query($owner: String!, $name: String!, $number: Int!, $files: String, $reviewThreads: String) {
-  repository(owner: $owner, name: $name) {
-    pullRequest(number: $number) {
-      id title headRefOid baseRefOid
-      reviews(states: PENDING, first: 1) { nodes { id } }
-      submitted: reviews(last: 100, states: [APPROVED, CHANGES_REQUESTED, COMMENTED, DISMISSED]) { nodes { viewerDidAuthor commit { oid } } }
-      files(first: 100, after: $files) { nodes { path viewerViewedState } pageInfo { hasNextPage endCursor } }
-      reviewThreads(first: 100, after: $reviewThreads) {
-        nodes {
-          id isResolved isOutdated path line originalLine diffSide
-          comments(first: 100) { nodes { id databaseId body state viewerDidAuthor author { login } } }
-        }
-        pageInfo { hasNextPage endCursor }
-      }
-    }
-  }
-}]]
-
--- shortcut: the last 100 comments, reviews, and checks.
-local OVERVIEW_QUERY = [[
-query($owner: String!, $name: String!, $number: Int!) {
-  repository(owner: $owner, name: $name) {
-    pullRequest(number: $number) {
-      url body state isDraft reviewDecision baseRefName headRefName author { login }
-      commits(last: 1) { nodes { commit { statusCheckRollup { state contexts(last: 100) { nodes {
-        ... on CheckRun { name status conclusion }
-        ... on StatusContext { context state }
-      } } } } } }
-      comments(last: 100) { nodes { author { login } body createdAt } }
-      reviews(last: 100, states: [APPROVED, CHANGES_REQUESTED, COMMENTED, DISMISSED]) { nodes { author { login } body state submittedAt } }
-    }
-  }
-}]]
 
 -- GitHub's diff colors (Primer), blended onto GitHub's own background.
 local COLORS = {
@@ -96,30 +51,7 @@ local function notify(msg, level)
   vim.notify('critique: ' .. msg, level)
 end
 
-local SPINNER = { '⠋', '⠙', '⠹', '⠸', '⠼', '⠴', '⠦', '⠧', '⠇', '⠏' }
--- An animated status line while a PR opens: the step, and git's own progress for it. It stops by itself when the
--- command that started it ends, even with an error.
-local progress = {}
-function progress.start(step)
-  local co, timer, frame = coroutine.running(), vim.uv.new_timer(), 0
-  progress.timer, progress.step, progress.detail = timer, step, nil
-  timer:start(0, 100, vim.schedule_wrap(function()
-    if progress.timer ~= timer or coroutine.status(co) == 'dead' then
-      if not timer:is_closing() then timer:close() end
-      return
-    end
-    frame = frame % #SPINNER + 1
-    local text = ('%s critique: %s%s'):format(SPINNER[frame], progress.step, progress.detail and (' · ' .. progress.detail) or '')
-    vim.api.nvim_echo({ { vim.fn.strcharpart(text, 0, math.max(vim.v.echospace, 20) - 1) } }, false, {})
-  end))
-end
-function progress.set(step) progress.step, progress.detail = step, nil end
-function progress.show(detail) progress.detail = detail end
-function progress.stop() progress.timer = nil end
-
-local function login(c)
-  return c.author and c.author.login or 'ghost'
-end
+local login = github.login
 
 local function first_line(s)
   return s:match('^[^\r\n]*')
@@ -234,32 +166,6 @@ local function read_base(buf)
   vim.bo[buf].buftype, vim.bo[buf].modifiable, vim.bo[buf].modified = 'nofile', false, false
   vim.bo[buf].filetype = vim.filetype.match({ filename = path, buf = buf }) or ''
   decorate(buf)
-end
-
-local function fetch_pr(st)
-  local vars, more, pr = { owner = st.owner, name = st.name, number = st.number }, { files = true, reviewThreads = true }, nil
-  while next(more) do -- the next page of each list that has one; a finished list is asked for after its end (empty)
-    local page = gh.gql(st.host, PR_QUERY, vars).repository.pullRequest
-    pr = pr or vim.tbl_extend('force', page, { files = { nodes = {} }, reviewThreads = { nodes = {} } })
-    for key in pairs(more) do
-      vim.list_extend(pr[key].nodes, page[key].nodes)
-      vars[key] = page[key].pageInfo.endCursor or vars[key]
-      more[key] = page[key].pageInfo.hasNextPage or nil
-    end
-  end
-  st.pr_id, st.review_id = pr.id, (pr.reviews.nodes[1] or {}).id
-  st.viewed = {}
-  for _, f in ipairs(pr.files.nodes) do st.viewed[f.path] = ({ VIEWED = 'viewed', DISMISSED = 'changed' })[f.viewerViewedState] end
-  for _, r in ipairs(pr.submitted.nodes) do
-    if r.viewerDidAuthor and r.commit then st.reviewed = r.commit.oid end -- your last review's commit, for :Critique since
-  end
-  st.threads = vim.tbl_map(function(t)
-    t.comments, t.outdated = t.comments.nodes, t.isOutdated
-    for _, c in ipairs(t.comments) do c.body = unsigned(c.body) end
-    t.line = t.line or t.originalLine -- an outdated thread stays where its code was, as in local reviews
-    return t
-  end, pr.reviewThreads.nodes)
-  return pr
 end
 
 -- What a viewed mark remembers in a local review: the file's diff, so a later change shows as "changed since viewed".
@@ -382,47 +288,15 @@ local function set_qf(reset)
   end
 end
 
--- Fetches commits for a PR: just those commits, without their history, in a repo critique set up that way, and
--- as a normal fetch in a full clone (made by critique before 0.4). Returns whether it worked, and git's error.
-local function fetch(git_dir, revs, on_progress)
-  local args = { 'fetch', '--progress', '--no-tags' }
-  if vim.uv.fs_stat(git_dir .. '/critique-shallow') then table.insert(args, '--depth=1') end
-  return gh.git_progress(git_dir, on_progress or function() end, vim.list_extend(args, { 'origin', unpack(revs) }))
-end
-
--- Downloads the file contents of a commit, with progress. Checking it out would download them anyway, but silently.
--- git skips those it already has.
-local function fetch_files(git_dir, rev, on_progress)
-  local ids = {}
-  for id in gh.git(git_dir, 'ls-tree', '-r', rev):gmatch(' blob (%x+)\t') do ids[#ids + 1] = id end
-  if #ids == 0 then return true end -- with nothing to ask for, git would fetch every branch
-  -- One string: given a list, vim.system writes each id separately, which blocks Neovim for seconds in a monorepo.
-  return gh.git_progress(git_dir, on_progress, { 'fetch', '--progress', '--no-tags', '--no-write-fetch-head', '--stdin', 'origin' },
-    table.concat(ids, '\n') .. '\n')
-end
-
-local function must(ok, err)
-  if not ok then error(err, 0) end
-end
-
 -- Changes since your last review: since your last :Critique submit (local), or since the commit your last GitHub review was on.
 local function load_since()
-  local from = S.review and S.review.reviewed_tree or S.reviewed
-  if not from then
-    error(S.review and 'nothing to compare yet: this shows what changed after your next :Critique submit' or "you haven't reviewed this PR yet", 0)
-  end
   local out
   if S.review then
+    local from = S.review.reviewed_tree
+    if not from then error('nothing to compare yet: this shows what changed after your next :Critique submit', 0) end
     out = store.diff(S.review, from)
   else
-    S.fetched = S.fetched or {} -- once per commit: refresh() calls this after every comment
-    if not S.fetched[from] then
-      if not fetch(S.git_dir, { from }) then
-        error(("can't fetch %s, the commit of your last review; was it force-pushed away?"):format(from:sub(1, 7)), 0)
-      end
-      S.fetched[from] = true
-    end
-    out = gh.git(S.git_dir, unpack(vim.list_extend(vim.list_slice(diff.GIT_ARGS), { from, S.head })))
+    out = github.since(S)
   end
   S.since = { files = diff.parse(out), by_path = {} }
   for _, f in ipairs(S.since.files) do S.since.by_path[f.path] = f end
@@ -433,7 +307,7 @@ local function refresh()
     load_local(S) -- the agent may have changed files too
     vim.cmd.checktime()
   else
-    fetch_pr(S)
+    github.load(S)
   end
   if S.since then load_since() end -- your submit, or the agent's edits, change what "since" shows
   set_qf() -- also for viewed marks: a viewed file may have changed
@@ -447,12 +321,6 @@ end
 
 local function writable()
   if S.review and S.review.closed then error('this review is closed', 0) end
-end
-
-local function ensure_review()
-  S.review_id = S.review_id
-    or gh.mutate(S.host, 'addPullRequestReview', { pullRequestId = S.pr_id, commitOID = S.head }, 'pullRequestReview { id }').pullRequestReview.id
-  return S.review_id
 end
 
 -- Saves a comment: an edit of ctx.comment, a reply in ctx.thread, or a new thread at ctx.anchor (on ctx.code).
@@ -473,16 +341,8 @@ local function post(ctx, body)
       store.append(S.log, ev)
       ctx.comment = { id = ev.id }
     end
-  elseif ctx.comment then
-    gh.mutate(S.host, 'updatePullRequestReviewComment', { pullRequestReviewCommentId = ctx.comment.id, body = signed(body) })
-  elseif ctx.thread then
-    local input = { pullRequestReviewThreadId = ctx.thread.id, pullRequestReviewId = ensure_review(), body = signed(body) }
-    ctx.comment = gh.mutate(S.host, 'addPullRequestReviewThreadReply', input, 'comment { id }').comment
   else
-    local input = vim.tbl_extend('force', ctx.anchor, { pullRequestReviewId = ensure_review(), body = signed(body) })
-    local t = gh.mutate(S.host, 'addPullRequestReviewThread', input, 'thread { id comments(first: 1) { nodes { id } } }').thread
-    if not t then error('GitHub rejected the comment', 0) end
-    ctx.comment = t.comments.nodes[1]
+    github.post(S, ctx, body)
   end
   return reopens
 end
@@ -846,13 +706,6 @@ local function open_local(handle)
   vim.schedule(function() notify(msg) end) -- after startup's first redraw, which would wipe it when opened via `nvim -c`
 end
 
--- Where your edits in a PR's checkout went when they were in the way of its new commits.
-local function stash_note(files, wt)
-  return ("your edits to %s in the PR's checkout were in the way of its new commits, so they're stashed. "
-    .. 'To get them back: git -C %s stash pop'):format(#files <= 3 and table.concat(files, ', ') or plural(#files, 'file'),
-    vim.fn.shellescape(wt))
-end
-
 function cmds.open(o)
   local url = table.concat(o.fargs, ' ', 2) -- handles can contain spaces (a checkout path)
   local host, owner, name, number = url:match('^https?://([^/]+)/([^/]+)/([^/]+)/pull/(%d+)')
@@ -860,75 +713,13 @@ function cmds.open(o)
     if url:match('^https?://') then error('usage: :Critique open https://<github host>/<owner>/<repo>/pull/<number>', 0) end
     return open_local(url)
   end
-  local st = { host = host, owner = owner, name = name, number = tonumber(number), overlay = true, by_path = {} }
-  progress.start(('opening %s/%s#%s'):format(owner, name, number))
-  local root = ('%s/critique/%s/%s/%s'):format(vim.fn.stdpath('cache'), host, owner, name)
-  local git_dir, wt = root .. '/repo.git', root .. '/pr-' .. number
-  if not vim.uv.fs_stat(git_dir) then
-    -- A repo of just the commits reviews need, without their history, and file contents only once they're used.
-    -- gh supplies the credentials for private repos. Set up under another name, so a half-made one is never used.
-    local new = git_dir .. '.new'
-    vim.fn.mkdir(root, 'p')
-    vim.fn.delete(new, 'rf')
-    gh.git(root, 'init', '--quiet', '--bare', new)
-    gh.git(new, 'remote', 'add', 'origin', ('https://%s/%s/%s.git'):format(host, owner, name))
-    for _, kv in ipairs({ { 'remote.origin.promisor', 'true' }, { 'remote.origin.partialclonefilter', 'blob:none' },
-      { 'credential.helper', '' }, { 'credential.helper', '!gh auth git-credential' } }) do
-      gh.git(new, 'config', '--add', kv[1], kv[2])
-    end
-    vim.fn.writefile({}, new .. '/critique-shallow')
-    assert(vim.uv.fs_rename(new, git_dir))
-  end
-  -- The PR from GitHub's API, and meanwhile its head commit.
-  local pr = gh.all({
-    function() return fetch_pr(st) end,
-    function() must(fetch(git_dir, { ('refs/pull/%d/head'):format(st.number) }, progress.show)) end,
-  })
-  -- Never ask git whether it has a commit (cat-file -e): in a partial clone, a missing one is then downloaded with
-  -- its whole history. Compare with what was fetched, or just fetch: git skips commits it already has.
-  if vim.trim(gh.git(git_dir, 'rev-parse', 'FETCH_HEAD')) ~= pr.headRefOid then
-    must(fetch(git_dir, { pr.headRefOid }, progress.show)) -- pushed to a moment ago
-  end
-  -- The files, and meanwhile the merge base that GitHub diffs against (git fetches run one at a time: they lock).
-  progress.set('downloading the files')
-  local fresh = not vim.uv.fs_stat(wt)
-  st.base = gh.all({
-    function() return gh.merge_base(host, owner, name, pr.baseRefOid, pr.headRefOid) end,
-    function()
-      if fresh then
-        gh.git(git_dir, 'worktree', 'prune') -- forget a checkout folder you deleted, or git won't make it again
-        gh.git(git_dir, 'worktree', 'add', '--quiet', '--no-checkout', '--detach', wt, pr.headRefOid)
-      end
-      must(fetch_files(git_dir, pr.headRefOid, progress.show))
-      progress.set('checking out the files')
-      local ok, err = gh.git_progress(wt, progress.show, { 'checkout', '--progress', '--detach', pr.headRefOid })
-      local edited = not ok and not fresh and vim.tbl_map(function(l) return l:sub(4) end, -- "XY path"
-        vim.split(gh.git(wt, 'status', '--porcelain', '--untracked-files=all'), '\n', { trimempty = true }))
-      if edited and #edited > 0 then
-        -- Edits in the checkout are in the way of the new commits (saved with auto_suggest off, by an auto-save
-        -- plugin, or by critique before 0.2). Stash them, new files too, so nothing is lost, and try again.
-        gh.git(wt, 'stash', 'push', '--include-untracked', '-m', ('critique: your edits, set aside to reopen PR #%d'):format(st.number))
-        st.stashed = edited
-        ok, err = gh.git_progress(wt, progress.show, { 'checkout', '--progress', '--detach', pr.headRefOid })
-        if not ok then err = err .. '\n' .. stash_note(edited, wt) end
-      end
-      must(ok, err)
-    end,
-  })
-  must(fetch(git_dir, { st.base }))
-
-  progress.set('computing the diff')
-  st.git_dir, st.dir, st.head = git_dir, vim.uv.fs_realpath(wt), pr.headRefOid
-  st.files = diff.parse(gh.git(git_dir, unpack(vim.list_extend(vim.list_slice(diff.GIT_ARGS), { st.base, st.head }))))
-  for _, f in ipairs(st.files) do st.by_path[f.path] = f end
-  st.title = ('#%d %s'):format(st.number, pr.title)
+  local st = github.open(host, owner, name, tonumber(number))
   if watcher then watcher:close() watcher = nil end
-  progress.stop()
   start(st)
   goto_anchor(url)
   notify(('%s · %s changed%s'):format(S.title, plural(#S.files, 'file'),
     S.reviewed and S.reviewed ~= S.head and ' · new commits since your last review: :Critique since' or ''))
-  if st.stashed then notify(stash_note(st.stashed, wt), vim.log.levels.WARN) end
+  if st.stashed then notify(st.stashed, vim.log.levels.WARN) end
 end
 
 -- Shows the review's list of files or threads, even when another quickfix list is the current one.
@@ -988,7 +779,7 @@ function cmds.delete()
   if S.review then
     store.append(S.log, { type = 'delete', id = c.id })
   else
-    gh.mutate(S.host, 'deletePullRequestReviewComment', { id = c.id })
+    github.delete(S, c)
   end
   refresh()
   notify('comment deleted')
@@ -1003,7 +794,7 @@ function cmds.resolve()
   if S.review then
     store.append(S.log, { type = 'resolve', thread = t.id, resolved = not t.isResolved, author = S.me, role = 'human' })
   else
-    gh.mutate(S.host, t.isResolved and 'unresolveReviewThread' or 'resolveReviewThread', { threadId = t.id })
+    github.resolve(S, t)
   end
   refresh()
   notify(t.isResolved and 'thread unresolved' or 'thread resolved')
@@ -1029,21 +820,10 @@ function cmds.submit()
     end
     return notify(("sent %s · the agent's turn"):format(plural(drafts, 'comment')))
   end
-  local event = gh.await(vim.ui.select, { 'COMMENT', 'APPROVE', 'REQUEST_CHANGES' }, {
-    prompt = 'Submit review as',
-    format_item = function(e) return (e:lower():gsub('_', ' ')) end,
-  })
-  if not event then return end
-  local body = gh.await(vim.ui.input, { prompt = 'Summary (optional): ' })
-  if not body then return end
-  body = body ~= '' and signed(body) or nil
-  if S.review_id then
-    gh.mutate(S.host, 'submitPullRequestReview', { pullRequestReviewId = S.review_id, event = event, body = body })
-  else
-    gh.mutate(S.host, 'addPullRequestReview', { pullRequestId = S.pr_id, commitOID = S.head, event = event, body = body })
-  end
+  local msg = github.submit(S)
+  if not msg then return end
   refresh()
-  notify('review submitted')
+  notify(msg)
 end
 
 -- Your edits in this file, as suggestions: the same as :w with auto_suggest on.
@@ -1089,7 +869,7 @@ function cmds.viewed()
   if S.review then
     store.append(S.log, { type = 'viewed', path = path, viewed = on, hash = on and fingerprint(file) or nil, author = S.me, role = 'human' })
   else
-    gh.mutate(S.host, on and 'markFileAsViewed' or 'unmarkFileAsViewed', { pullRequestId = S.pr_id, path = path })
+    github.viewed(S, path, on)
   end
   S.viewed[path] = on and 'viewed' or nil
   set_qf()
@@ -1113,8 +893,6 @@ function cmds.viewed()
   notify(('%d/%d viewed'):format(n, total))
 end
 
-local FAILED = { failure = true, error = true, timed_out = true, cancelled = true, startup_failure = true, action_required = true }
-
 -- What the review is about and its conversation, in a read-only markdown buffer.
 function cmds.overview()
   local lines, entries = { '# ' .. S.title }, {}
@@ -1125,34 +903,9 @@ function cmds.overview()
       if ev.type == 'submit' then table.insert(entries, { who = (ev.author or ev.role) .. ' submitted', at = ev.at, body = ev.summary or '' }) end
     end
   else
-    local pr = gh.gql(S.host, OVERVIEW_QUERY, { owner = S.owner, name = S.name, number = S.number }).repository.pullRequest
-    local checks = vim.tbl_get(pr, 'commits', 'nodes', 1, 'commit', 'statusCheckRollup')
-    vim.list_extend(lines, {
-      ('%s wants to merge `%s` into `%s` · %s%s'):format(login(pr), pr.headRefName, pr.baseRefName, pr.state:lower(), pr.isDraft and ' · draft' or ''),
-      pr.url, '',
-    })
-    if pr.reviewDecision then table.insert(lines, 'Review: ' .. pr.reviewDecision:lower():gsub('_', ' ')) end
-    local passed, skipped, rest = 0, 0, {} -- like GitHub: count what passed, list the rest
-    for _, c in ipairs(checks and checks.contexts.nodes or {}) do
-      local result = (c.conclusion or c.state or c.status):lower()
-      if result == 'success' then passed = passed + 1
-      elseif result == 'skipped' or result == 'neutral' then skipped = skipped + 1
-      else table.insert(rest, ('- %s %s (%s)'):format(FAILED[result] and '✗' or '•', c.name or c.context, (result:gsub('_', ' ')))) end
-    end
-    table.insert(lines, checks and ('Checks: %s · %d passed%s'):format(checks.state:lower(), passed, skipped > 0 and (', ' .. skipped .. ' skipped') or '')
-      or 'Checks: none')
-    vim.list_extend(lines, rest)
-    vim.list_extend(lines, { '', '## Description', '' })
-    vim.list_extend(lines, pr.body ~= '' and split(pr.body) or { '_No description._' })
-    for _, c in ipairs(pr.comments.nodes) do table.insert(entries, { who = login(c), at = c.createdAt, body = unsigned(c.body) }) end
-    for _, r in ipairs(pr.reviews.nodes) do
-      local body = unsigned(r.body)
-      if body ~= '' or r.state ~= 'COMMENTED' then -- a bare COMMENTED review is just its threads, which are on the code
-        local verdict = ({ APPROVED = ' approved', CHANGES_REQUESTED = ' requested changes', DISMISSED = ' (dismissed)' })[r.state] or ''
-        table.insert(entries, { who = login(r) .. verdict, at = r.submittedAt, body = body })
-      end
-    end
-    table.sort(entries, function(a, b) return a.at < b.at end)
+    local more
+    more, entries = github.overview(S)
+    vim.list_extend(lines, more)
   end
   vim.list_extend(lines, { '', '## Conversation' })
   if #entries == 0 then vim.list_extend(lines, { '', '_Nothing yet._' }) end
@@ -1179,11 +932,7 @@ end
 function cmds.link(o)
   local path, side = here()
   if S.review then error('links need a GitHub PR; this is a local review', 0) end
-  local file = S.by_path[path]
-  if side == 'LEFT' and file then path = file.old_path end
-  local lines = o.line1 == o.line2 and ('L%d'):format(o.line1) or ('L%d-L%d'):format(o.line1, o.line2)
-  local url = ('https://%s/%s/%s/blob/%s/%s#%s'):format(S.host, S.owner, S.name, side == 'LEFT' and S.base or S.head,
-    (path:gsub('[^%w%-._~/]', function(c) return ('%%%02X'):format(c:byte()) end)), lines)
+  local url = github.permalink(S, path, side, o.line1, o.line2)
   vim.fn.setreg('"', url)
   if vim.fn.has('clipboard') == 1 then
     vim.fn.setreg('+', url)
