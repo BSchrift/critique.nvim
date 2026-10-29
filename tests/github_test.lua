@@ -465,4 +465,91 @@ H.test('every thread and viewed mark arrives, past the first 100', function()
   assert(ok, err)
 end)
 
+H.section('links, threads, viewed marks, and the overview')
+local function where() return (vim.api.nvim_buf_get_name(0):gsub('^.*/pr%-7/', '')) .. ':' .. vim.fn.line('.') end
+local function mine(id, resolved) -- a thread on a.txt:3 with your pending comment
+  return { id = 'T_' .. id, isResolved = resolved or false, isOutdated = false, path = 'a.txt', line = 3, diffSide = 'RIGHT', comments = { nodes = {
+    { id = 'C_' .. id, databaseId = id, body = 'Mine', state = 'PENDING', viewerDidAuthor = true, author = { login = 'me' } },
+  } } }
+end
+-- Runs a :Critique command and returns the message it ends with.
+local function run(cmd)
+  local before = #messages
+  vim.cmd(cmd)
+  H.wait_for(function() return #messages > before end, cmd)
+  return messages[#messages].msg
+end
+H.test('a link to a line, a file, or a comment opens there', function()
+  local hash = vim.fn.sha256('a.txt')
+  open(nil, URL .. '/files#diff-' .. hash .. 'R3')
+  H.eq(where(), 'a.txt:3')
+  open(nil, URL .. '/files#diff-' .. hash .. 'L2')
+  H.eq(where(), 'critique://base/a.txt:2')
+  open(nil, URL .. '/files#diff-' .. hash)
+  H.eq(where(), 'a.txt:1', "the file's first change")
+  open({ mine(42) }, URL .. '#discussion_r42')
+  H.eq(where(), 'a.txt:3')
+  local msgs = open(nil, URL .. '/files#diff-' .. vim.fn.sha256('nope.txt'))
+  H.ok(vim.iter(msgs):any(function(m) return m:find("the link points at something that is not in this PR's diff", 1, true) end), vim.inspect(msgs))
+end)
+H.test(':Critique link copies a permalink to the line or lines, at the commit the buffer shows', function()
+  open()
+  on_line('a.txt', 3)
+  local head, base = H.git(origin, 'rev-parse', 'pr'), H.git(origin, 'merge-base', 'main', 'pr')
+  vim.cmd('Critique link')
+  H.eq(vim.fn.getreg('"'), ('https://github.example/o/r/blob/%s/a.txt#L3'):format(head))
+  vim.cmd('2,3Critique link')
+  H.eq(vim.fn.getreg('"'), ('https://github.example/o/r/blob/%s/a.txt#L2-L3'):format(head))
+  vim.cmd('Critique before')
+  vim.cmd('Critique link')
+  H.eq(vim.fn.getreg('"'), ('https://github.example/o/r/blob/%s/a.txt#L2'):format(base), 'the base version, at the line mapped there')
+end)
+H.test('resolve, unresolve, delete, and viewed go to GitHub', function()
+  local select = vim.ui.select
+  vim.ui.select = function(items, _, cb) cb(items[1]) end
+  local ok, err = pcall(function()
+    open({ mine(5) })
+    on_line('a.txt', 3)
+    H.eq(run('Critique resolve'), 'critique: thread resolved')
+    H.eq(last_sent('resolveReviewThread'), { threadId = 'T_5' })
+    H.eq(run('Critique delete'), 'critique: comment deleted')
+    H.eq(last_sent('deletePullRequestReviewComment'), { id = 'C_5' })
+    open({ mine(6, true) })
+    on_line('a.txt', 3)
+    H.eq(run('Critique resolve'), 'critique: thread unresolved')
+    H.eq(last_sent('unresolveReviewThread'), { threadId = 'T_6' })
+    H.has(run('Critique viewed'), 'viewed')
+    H.eq(last_sent('markFileAsViewed'), { pullRequestId = 'PR_7', path = 'a.txt' })
+    H.ok(where() ~= 'a.txt:3', 'moved on to the next file')
+    on_line('a.txt', 3)
+    H.has(run('Critique viewed'), 'not viewed: a.txt')
+    H.eq(last_sent('unmarkFileAsViewed'), { pullRequestId = 'PR_7', path = 'a.txt' })
+  end)
+  vim.ui.select = select
+  assert(ok, err)
+end)
+H.test('the overview counts the checks that passed and lists the rest', function()
+  overview = { url = URL, body = '', state = 'OPEN', isDraft = true, reviewDecision = 'CHANGES_REQUESTED', baseRefName = 'main',
+    headRefName = 'pr', author = { login = 'amy' }, comments = { nodes = {} }, reviews = { nodes = {} },
+    commits = { nodes = { { commit = { statusCheckRollup = { state = 'FAILURE', contexts = { nodes = {
+      { name = 'lint', status = 'COMPLETED', conclusion = 'SUCCESS' },
+      { name = 'docs', status = 'COMPLETED', conclusion = 'SKIPPED' },
+      { name = 'test (linux)', status = 'COMPLETED', conclusion = 'FAILURE' },
+      { name = 'deploy', status = 'IN_PROGRESS' },
+      { context = 'ci/legacy', state = 'SUCCESS' },
+    } } } } } } } }
+  open()
+  vim.cmd('Critique overview')
+  H.wait_for(function() return vim.api.nvim_buf_get_name(0) == 'critique://overview' end, 'the overview')
+  H.eq(vim.api.nvim_buf_get_lines(0, 1, 9, false), {
+    'amy wants to merge `pr` into `main` · open · draft', URL, '',
+    'Review: changes requested',
+    'Checks: failure · 2 passed, 1 skipped',
+    '- ✗ test (linux) (failure)',
+    '- • deploy (in progress)',
+    '',
+  })
+  vim.cmd('quit')
+end)
+
 H.done()
