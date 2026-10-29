@@ -889,7 +889,10 @@ function cmds.open(o)
   st.base = gh.all({
     function() return gh.merge_base(host, owner, name, pr.baseRefOid, pr.headRefOid) end,
     function()
-      if fresh then gh.git(git_dir, 'worktree', 'add', '--quiet', '--no-checkout', '--detach', wt, pr.headRefOid) end
+      if fresh then
+        gh.git(git_dir, 'worktree', 'prune') -- forget a checkout folder you deleted, or git won't make it again
+        gh.git(git_dir, 'worktree', 'add', '--quiet', '--no-checkout', '--detach', wt, pr.headRefOid)
+      end
       must(fetch_files(git_dir, pr.headRefOid, progress.show))
       progress.set('checking out the files')
       local ok, err = gh.git_progress(wt, progress.show, { 'checkout', '--progress', '--detach', pr.headRefOid })

@@ -232,6 +232,13 @@ H.test("the files' ids go to git in one piece, not one write per file", function
   for id in H.git(origin8, 'ls-tree', '-r', 'pr'):gmatch(' blob (%x+)\t') do ids[#ids + 1] = id end
   H.eq(stdin, table.concat(ids, '\n') .. '\n')
 end)
+H.test('reopening a PR whose checkout folder you deleted makes a new one', function()
+  vim.cmd('silent! %bwipeout!')
+  vim.fn.delete(cache8 .. '/pr-8', 'rf')
+  local msgs = open(nil, URL8)
+  H.has(msgs[#msgs], '#8 Change two · 1 file changed')
+  H.eq(vim.fn.readfile(cache8 .. '/pr-8/a.txt'), { 'one', 'TWO again', 'three' })
+end)
 H.test('a failed download stops the progress line and says why', function()
   echoes = {}
   local before = #messages

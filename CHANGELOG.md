@@ -22,6 +22,8 @@ lazy.nvim, `version = '*'` follows them.
   went; it used to leave them in the stash without a word.
 - Opening a PR in a very big repo (a million files) froze Neovim for about 2 seconds while it asked git
   for the files. It takes a few milliseconds now.
+- After you deleted a PR's checkout folder (`.../pr-<number>`), reopening the PR failed, as git still had
+  the folder on record. Reopening makes it again now.
 
 ## [0.8.0] - 2026-10-28
 

@@ -380,7 +380,7 @@ clipboard provider, it goes to the unnamed register only, so `p` pastes it.
   that holds only the commits reviews need, fetched one at a time without their history (`--depth=1`):
   each PR's head, and the merge base its diff starts from, which GitHub's API reports. File contents
   download as they're needed (a partial clone). Each PR gets a git worktree next to it at
-  `.../pr-<number>`. While a PR opens, critique asks GitHub for the PR and fetches its head at the
+  `.../pr-<number>`; deleting one is safe, as reopening the PR makes it again. While a PR opens, critique asks GitHub for the PR and fetches its head at the
   same time, and looks up the merge base while the files download. Neovim's working directory is set to that worktree, which is why every
   other tool just works. Reopening a PR fetches new commits and checks out the PR head; if edits saved in the worktree are in
   the way, critique stashes them first and tells you how to get them back. Comments go through
