@@ -382,6 +382,8 @@ function C.ack(o)
   if #store.unread(t) > 0 then out('It covers:\n' .. unread_lines(t)) end
 end
 
+local function first(s) return (s or ''):match('^[^\r\n]*') end
+
 -- The human's events after `since`, as one line each, once they are visible to the agent (drafts are not).
 local function human_lines(log, since, printed)
   local r = store.load(log, 'agent')
@@ -389,7 +391,6 @@ local function human_lines(log, since, printed)
   for _, t in ipairs(r.threads) do
     for _, c in ipairs(t.comments) do by_comment[c.id] = { t = t, c = c } end
   end
-  local function first(s) return (s or ''):match('^[^\r\n]*') end
   local events = store.events(log) -- one snapshot: what we report and how far we got must agree
   for _, ev in ipairs(events) do
     local hit = ev.id and by_comment[ev.id]
@@ -434,7 +435,7 @@ function C.watch(o)
     if t.needs_agent then
       local unread = store.unread(t)
       local c = unread[#unread] or t.comments[#t.comments]
-      table.insert(pending, ('#%d waiting · %s:%s · %s: %s'):format(t.n, t.path, t.line or t.orig_line, c.author, (c.body:match('^[^\r\n]*'))))
+      table.insert(pending, ('#%d waiting · %s:%s · %s: %s'):format(t.n, t.path, t.line or t.orig_line, c.author, first(c.body)))
     end
   end
   io.stdout:setvbuf('line')

@@ -172,7 +172,7 @@ function M.viewed(st, path, on)
   gh.mutate(st.host, on and 'markFileAsViewed' or 'unmarkFileAsViewed', { pullRequestId = st.pr_id, path = path })
 end
 
--- Asks how to submit your pending review (or a review with just a summary), and submits it. Nil if you cancel.
+-- Asks how to submit your pending review (or a review with just a summary), and submits it. Nothing if you cancel.
 function M.submit(st)
   local event = gh.await(vim.ui.select, { 'COMMENT', 'APPROVE', 'REQUEST_CHANGES' }, {
     prompt = 'Submit review as',
@@ -187,7 +187,7 @@ function M.submit(st)
   else
     gh.mutate(st.host, 'addPullRequestReview', { pullRequestId = st.pr_id, commitOID = st.head, event = event, body = body })
   end
-  return 'review submitted'
+  return true
 end
 
 local FAILED = { failure = true, error = true, timed_out = true, cancelled = true, startup_failure = true, action_required = true }

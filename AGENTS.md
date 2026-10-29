@@ -17,14 +17,15 @@ and a reply that ends with what you skipped and any risk.
 
 ## Before you change code
 
-- Read the code the change touches, and grep every caller. `lua/critique/init.lua` is shared by GitHub
-  reviews and local (agent) reviews: a change there usually affects both.
+- Read the code the change touches, and grep every caller. `lua/critique/init.lua` draws both GitHub
+  reviews and local (agent) reviews, through `S.backend`: `github.lua` or `local.lua`, which offer the
+  same functions. A change to one backend usually needs the same change in the other.
 - Supported: Neovim 0.11 and newer. Use 0.12-only APIs only with a fallback (see `M.text` in diff.lua).
 - Async code runs in coroutines (`gh.async` / `gh.await` / `gh.all` / `gh.wait` in `lua/critique/gh.lua`).
   Never wrap a call that can yield in `pcall`: it fails on PUC Lua builds of Neovim.
 - critique's PR checkouts are partial, history-free clones. Never run git commands there that look up
   objects that may be missing (`cat-file -e`, `rev-parse <sha>^{commit}`): git then downloads the
-  commit with its whole history. Fetch with `--depth=1` instead, as `fetch()` in init.lua does.
+  commit with its whole history. Fetch with `--depth=1` instead, as `fetch()` in github.lua does.
 
 ## Tests
 

@@ -173,39 +173,6 @@ local function read_base(buf)
   decorate(buf)
 end
 
--- What a viewed mark remembers in a local review: the file's diff, so a later change shows as "changed since viewed".
--- shortcut: binary files have no diff lines, so a change to one keeps its mark; hash the file if that matters.
-local function fingerprint(f)
-  local parts = { f.status, f.old_path or '' }
-  for _, h in ipairs(f.hunks) do
-    for _, l in ipairs(h.lines) do parts[#parts + 1] = l.kind .. l.text end
-  end
-  return vim.fn.sha256(table.concat(parts, '\n'))
-end
-
--- A local review (see store.lua), in the same shape as GitHub's threads so the UI is shared.
-local function load_local(st)
-  local r = store.load(st.log, 'human')
-  st.review, st.base, st.title = r, r.base, r.id .. ' · ' .. r.title
-  st.files, st.by_path = diff.parse(store.diff(r)), {}
-  for _, f in ipairs(st.files) do st.by_path[f.path] = f end
-  st.viewed = {}
-  for path, hash in pairs(r.viewed) do
-    if st.by_path[path] then st.viewed[path] = fingerprint(st.by_path[path]) == hash and 'viewed' or 'changed' end
-  end
-  st.threads = vim.tbl_map(function(t)
-    return { -- an outdated thread stays where its code was, so you can still read and answer it
-      id = t.id, n = t.n, path = t.path, line = t.line or t.orig_line, outdated = t.outdated, isResolved = t.resolved,
-      ack = t.ack and not t.resolved and not t.needs_agent and t.ack.author or nil, -- a newer comment of yours is waiting
-      sent = r.live and t.needs_agent or nil, -- live: sent, but the agent hasn't picked it up yet
-      diffSide = t.side == 'old' and 'LEFT' or 'RIGHT',
-      comments = vim.tbl_map(function(c)
-        return { id = c.id, body = c.body, state = c.pending and 'PENDING' or 'SUBMITTED', viewerDidAuthor = c.role == 'human', author = { login = c.author } }
-      end, t.comments),
-    }
-  end, r.threads)
-end
-
 -- Where the file list takes you in a file: its first change (in a deleted file, on its old version).
 local function first_change(f)
   local side = f.status == 'D' and 'LEFT' or 'RIGHT'
@@ -295,33 +262,15 @@ end
 
 -- Changes since your last review: since your last :Critique submit (local), or since the commit your last GitHub review was on.
 local function load_since()
-  local out
-  if S.review then
-    local from = S.review.reviewed_tree
-    if not from then error('nothing to compare yet: this shows what changed after your next :Critique submit', 0) end
-    out = store.diff(S.review, from)
-  else
-    out = github.since(S)
-  end
-  S.since = { files = diff.parse(out), by_path = {} }
+  S.since = { files = diff.parse(S.backend.since(S)), by_path = {} }
   for _, f in ipairs(S.since.files) do S.since.by_path[f.path] = f end
 end
 
 local function refresh()
-  if S.review then
-    load_local(S) -- the agent may have changed files too
-    vim.cmd.checktime()
-  else
-    github.load(S)
-  end
+  S.backend.load(S)
   if S.since then load_since() end -- your submit, or the agent's edits, change what "since" shows
   set_qf() -- also for viewed marks: a viewed file may have changed
   redraw()
-end
-
-local function status(r)
-  local turn = r.closed and 'closed' or r.turn == 'human' and 'your turn' or r.turn == 'agent' and "the agent's turn" or 'not submitted yet'
-  return turn .. (r.live and not r.closed and ' · live' or '')
 end
 
 local function writable()
@@ -332,25 +281,7 @@ end
 -- Returns whether it reopened a resolved thread.
 local function post(ctx, body)
   writable()
-  local reopens = S.review and ctx.thread and ctx.thread.isResolved and not ctx.comment -- a new reply on a resolved thread
-  if S.review then
-    if ctx.comment then
-      store.append(S.log, { type = 'edit', id = ctx.comment.id, body = body, author = S.me, role = 'human' })
-    else
-      local ev = { type = 'comment', id = store.new_id(), author = S.me, role = 'human', body = body }
-      ev.thread = ctx.thread and ctx.thread.id or ev.id
-      if not ctx.thread then
-        local a = ctx.anchor
-        ev.path, ev.side, ev.line, ev.start_line, ev.code = a.path, a.side == 'LEFT' and 'old' or 'new', a.line, a.startLine, ctx.code
-        if ev.side == 'new' then ev.before, ev.after = store.context(store.file_lines(S.review, ev.path, 'new') or {}, ev.code, ev.line) end
-      end
-      store.append(S.log, ev)
-      ctx.comment = { id = ev.id }
-    end
-  else
-    github.post(S, ctx, body)
-  end
-  return reopens
+  return S.backend.post(S, ctx, body)
 end
 
 local function save(buf, ctx)
@@ -670,40 +601,16 @@ end
 
 -- A local review by handle (`<id>[@path][#n]`); with no handle, the one in this repo, or a new one.
 local function open_local(handle)
-  local cwd, log, n = vim.uv.cwd(), nil, nil
-  if handle ~= '' then
-    log, n = store.find(handle, cwd)
-  else
-    local cache = (vim.uv.fs_realpath(vim.fn.stdpath('cache')) or vim.fn.stdpath('cache')) .. '/critique/'
-    if vim.startswith(vim.uv.fs_realpath(cwd) or cwd, cache) then
-      error("this folder is critique's checkout of a GitHub PR: :Critique open <PR url> reopens it, and local reviews go in your own repo", 0)
-    end
-    local reviews = store.list(cwd)
-    if #reviews == 0 then
-      local ok, root = pcall(store.git, cwd, 'rev-parse', '--show-toplevel')
-      if not ok then error('not in a git repository; pass a PR URL or a review handle', 0) end
-      local branch = store.git(root, 'branch', '--show-current')
-      log = store.start(root, { title = branch ~= '' and branch or nil, author = vim.trim(vim.fn.system({ 'git', '-C', root, 'config', 'user.name' })), role = 'human' })
-    else
-      local r = pick(reviews, 'Open review', function(r) return r.id .. ' · ' .. r.title end)
-      if not r then return end
-      log = r.log
-    end
-  end
-  local st = { log = log, overlay = true }
-  st.dir = vim.uv.fs_realpath(log:match('^(.*)/%.critique/reviews/'))
-  st.me = vim.trim(vim.fn.system({ 'git', '-C', st.dir, 'config', 'user.name' }))
-  st.me = st.me ~= '' and st.me or os.getenv('USER') or 'me'
-  st.git_dir = st.dir
-  load_local(st)
-  st.announced = #store.events(log) -- announce only what happens from now on
+  local st, n = require('critique.local').open(handle)
+  if not st then return end
+  st.announced = #store.events(st.log) -- announce only what happens from now on
   start(st)
-  watch(log)
+  watch(st.log)
   for _, t in ipairs(S.threads) do
     if t.n == n then show(t.path, t.diffSide, t.line) end
   end
   local r, open = S.review, #vim.tbl_filter(function(t) return not t.isResolved end, S.threads)
-  local turn = status(r)
+  local turn = S.backend.status(r)
   local last = r.last_submit and r.last_submit.role == 'agent' and r.last_submit.summary
   local msg = ('%s · %s changed · %s · %s%s'):format(S.title, plural(#S.files, 'file'), plural(open, 'open thread'), turn,
     last and (' · ' .. r.last_submit.author .. ': ' .. last) or '')
@@ -780,11 +687,7 @@ function cmds.delete()
     format_item = function(c) return (c.state == 'PENDING' and '(pending) ' or '') .. first_line(c.body) end,
   })
   if not c then return end
-  if S.review then
-    store.append(S.log, { type = 'delete', id = c.id, author = S.me, role = 'human' })
-  else
-    github.delete(S, c)
-  end
+  S.backend.delete(S, c)
   refresh()
   notify('comment deleted')
 end
@@ -795,11 +698,7 @@ function cmds.resolve()
   if #ts == 0 then error('no thread on this line', 0) end
   local t = pick(ts, 'Resolve thread', thread_label)
   if not t then return end
-  if S.review then
-    store.append(S.log, { type = 'resolve', thread = t.id, resolved = not t.isResolved, author = S.me, role = 'human' })
-  else
-    github.resolve(S, t)
-  end
+  S.backend.resolve(S, t)
   refresh()
   notify(t.isResolved and 'thread unresolved' or 'thread resolved')
 end
@@ -812,22 +711,14 @@ function cmds.submit()
   if #unsaved > 0 then
     error(("%s isn't saved: :w it (or :q! to discard it) first"):format(#unsaved == 1 and '1 comment' or (#unsaved .. ' comments')), 0)
   end
-  if S.review then
-    local drafts = #S.review.drafts
-    local summary = gh.await(vim.ui.input, { prompt = 'Summary for the agent (optional): ' })
-    if not summary then return end
-    local ok, tree = pcall(store.snapshot, S.dir) -- what you reviewed, for :Critique since; never block a submit on it
-    store.append(S.log, { type = 'submit', author = S.me, role = 'human', summary = summary ~= '' and summary or nil, tree = ok and tree or nil })
-    refresh()
-    if S.review.live then -- the comments already went out as they were saved
-      return notify(("told %s: that's all for now"):format(S.review.agent_author or 'the agent'))
-    end
-    return notify(("sent %s · the agent's turn"):format(plural(drafts, 'comment')))
-  end
-  local msg = github.submit(S)
-  if not msg then return end
+  local sent = S.backend.submit(S)
+  if not sent then return end
   refresh()
-  notify(msg)
+  if not S.review then return notify('review submitted') end
+  if S.review.live then -- the comments already went out as they were saved
+    return notify(("told %s: that's all for now"):format(S.review.agent_author or 'the agent'))
+  end
+  notify(("sent %s · the agent's turn"):format(plural(sent, 'comment')))
 end
 
 -- Your edits in this file, as suggestions: the same as :w with auto_suggest on.
@@ -870,11 +761,7 @@ function cmds.viewed()
   local file = S.by_path[path]
   if not file then error('not a changed file in this review', 0) end
   local on = S.viewed[path] ~= 'viewed'
-  if S.review then
-    store.append(S.log, { type = 'viewed', path = path, viewed = on, hash = on and fingerprint(file) or nil, author = S.me, role = 'human' })
-  else
-    github.viewed(S, path, on)
-  end
+  S.backend.viewed(S, path, on)
   S.viewed[path] = on and 'viewed' or nil
   set_qf()
   local n, total = viewed_count()
@@ -899,18 +786,8 @@ end
 
 -- What the review is about and its conversation, in a read-only markdown buffer.
 function cmds.overview()
-  local lines, entries = { '# ' .. S.title }, {}
-  if S.review then
-    local r = S.review
-    table.insert(lines, ('base `%s` (%s) · %s'):format(r.base_ref, r.base:sub(1, 7), status(r)))
-    for _, ev in ipairs(store.events(S.log)) do
-      if ev.type == 'submit' then table.insert(entries, { who = (ev.author or ev.role) .. ' submitted', at = ev.at, body = ev.summary or '' }) end
-    end
-  else
-    local more
-    more, entries = github.overview(S)
-    vim.list_extend(lines, more)
-  end
+  local lines, entries = S.backend.overview(S)
+  table.insert(lines, 1, '# ' .. S.title)
   vim.list_extend(lines, { '', '## Conversation' })
   if #entries == 0 then vim.list_extend(lines, { '', '_Nothing yet._' }) end
   for _, e in ipairs(entries) do
@@ -951,7 +828,7 @@ function cmds.live()
   if not S.review then error('live mode is for local reviews with an agent', 0) end
   writable()
   local on, drafts = not S.review.live, #S.review.drafts
-  store.append(S.log, { type = 'live', live = on, author = S.me, role = 'human' })
+  S.backend.live(S, on)
   refresh()
   notify(on and ('live: your comments reach the agent as you save them%s'):format(drafts > 0 and (' · sent your ' .. plural(drafts, 'draft')) or '')
     or 'live off: comments are drafts until :Critique submit')

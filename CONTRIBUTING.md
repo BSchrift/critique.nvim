@@ -19,7 +19,9 @@ They run offline in headless Neovim (0.11 or newer) and need only git. GitHub is
 
 | File | What it does |
 |---|---|
-| `lua/critique/init.lua` | The `:Critique` commands and everything you see in Neovim |
+| `lua/critique/init.lua` | The `:Critique` commands and everything you see in Neovim, for both kinds of review |
+| `lua/critique/github.lua` | GitHub PRs: the checkout, threads, viewed marks, and posting back |
+| `lua/critique/local.lua` | Local reviews in Neovim, on top of `store.lua`, in the same shape as `github.lua` |
 | `lua/critique/diff.lua` | Parsing `git diff` and drawing the diff overlay |
 | `lua/critique/store.lua` | Local reviews: the event log in `.critique/` |
 | `lua/critique/cli.lua` | The `critique` shell command that agents use |
