@@ -398,14 +398,18 @@ function M.diff(review, since)
   local out = run(vim.list_extend({ 'git', '-C', review.root, unpack(require('critique.diff').GIT_ARGS) },
     vim.list_extend({ review.base, '--' }, scope)))
   local untracked = run(vim.list_extend({ 'git', '-C', review.root, 'ls-files', '-z', '--others', '--exclude-standard', '--' }, scope))
-  for _, f in ipairs(vim.split(untracked, '\0', { trimempty = true })) do
-    -- --no-index exits 1 when the files differ, which they always do here; more than 1 is a real failure.
-    local r = vim.system(vim.list_extend({ 'git', unpack(require('critique.diff').GIT_ARGS) }, { '--no-index', '/dev/null', f }),
-      { cwd = review.root }):wait()
-    if r.code > 1 then error(('git diff %s: %s'):format(f, vim.trim(r.stderr)), 0) end
-    out = out .. r.stdout
-  end
-  return out
+  if untracked == '' then return out end
+  -- All untracked files in one diff: an index holding only them, as "intent to add", against the working tree.
+  local tmp = os.tmpname()
+  os.remove(tmp) -- git reads a missing index as empty, but an empty file as corrupt
+  local env = { GIT_INDEX_FILE = tmp, GIT_LITERAL_PATHSPECS = '1' } -- file names are names, not patterns
+  local ok, added = pcall(function()
+    run({ 'git', '-C', review.root, 'add', '--intent-to-add', '--pathspec-from-file=-', '--pathspec-file-nul' }, { env = env, stdin = untracked })
+    return run({ 'git', '-C', review.root, unpack(require('critique.diff').GIT_ARGS) }, { env = env })
+  end)
+  os.remove(tmp)
+  if not ok then error(added, 0) end
+  return out .. added
 end
 
 return M

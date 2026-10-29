@@ -16,6 +16,8 @@ lazy.nvim, `version = '*'` follows them.
   prints what you added, `resolve` refuses until it has read it, and `ack` prints the comments it covers.
 - Live reviews: editing a comment in Neovim didn't hold the agent back while you were still typing, and
   `critique watch` never told the agent you deleted one. Edits and deletes now say who made them.
+- Local reviews: a new file named like an option (`-notes.md`) stopped the review from loading, and each new
+  file took its own git call (500 new files: 3 seconds on every refresh). All new files are now one call.
 
 ## [0.8.0] - 2026-10-28
 
