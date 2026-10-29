@@ -955,10 +955,10 @@ H.test("the agent's ack, reply, and resolve show up as they happen", function()
   before = #messages
   H.run(root, { 'reply', '1', 'Removed it.' })
   H.run(root, { 'resolve', '1' })
+  -- One notification, "claude replied on #1, resolved #1", if both land within its 300 ms debounce; else two.
   H.wait_for(function()
-    for i = before + 1, #messages do
-      if messages[i].msg:find('claude replied on #1, resolved #1', 1, true) then return true end
-    end
+    local said = table.concat(vim.tbl_map(function(m) return m.msg end, vim.list_slice(messages, before + 1)), '\n')
+    return said:find('claude replied on #1', 1, true) and said:find('resolved #1', 1, true)
   end, 'the reply/resolve notification')
   H.lacks(thread_texts()[1][2], '⏳')
   H.has(thread_texts()[1][2], '✓ #1 (2)')
@@ -1387,7 +1387,9 @@ H.test('checks Neovim and git, and flags options setup() does not know', functio
     H.has(text, 'OK Neovim ' .. tostring(vim.version()))
     H.has(text, 'OK git ')
     H.has(text, 'unknown option "autosuggest" in setup()')
-    H.ok(text:find('\n%- critique%.nvim %S+'), 'the version (a tag, or the commit in a checkout without tags)')
+    if vim.uv.fs_stat(H.plugin .. '/.git') then -- a release tarball has no version to show
+      H.ok(text:find('\n%- critique%.nvim %S+'), 'the version (a tag, or the commit in a checkout without tags)')
+    end
     H.lacks(text, 'Failed to run healthcheck')
     H.lacks(text, 'old version is still running')
     vim.cmd('tabclose')
