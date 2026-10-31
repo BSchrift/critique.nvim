@@ -6,6 +6,16 @@ lazy.nvim, `version = '*'` follows them.
 
 ## [Unreleased]
 
+### Changed
+
+- A thread's label shows its state (`⏳ claude is on it`, `sent`) right after its number, before the
+  comment text, so a narrow window no longer cuts it off.
+
+### Fixed
+
+- Live reviews: the skill tells the agent to run `critique ack` on its own before it starts a fix, so
+  ⏳ shows on the thread while it works (it could run it with the fix, and ⏳ never showed).
+
 ## [0.11.0] - 2026-10-29
 
 ### Added

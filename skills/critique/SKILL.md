@@ -97,9 +97,10 @@ a submit, and your replies and resolves reach them right away.
    `wait` and `watch` read the review's state, so restarting them never loses a comment. If you have to stop
    listening, tell the user, since their comments won't reach you until you start again.
 3. **For each comment you start on, acknowledge it first** so the user sees ⏳ on the thread:
-   `critique ack -r <id> 3`. It prints the comments it covers. Then handle it as in A5: change the code,
-   reply, and resolve what you fixed. No submit is needed for each one; use `critique submit` only to hand
-   back a summary of a bigger batch.
+   `critique ack -r <id> 3`. Run it as its own command, not chained with your fix, so ⏳ shows while you work;
+   it prints the comments it covers. Then handle it as in A5: change the code, reply, and resolve what you
+   fixed. No submit is needed for each one; use `critique submit` only to hand back a summary of a bigger
+   batch.
    The user may add to a thread while you work on it. Then `reply` prints what they added, and `resolve`
    refuses: run `critique ack -r <id> 3` again to read it, then answer it.
 4. Repeat until the user submits with nothing open or says they're done; then `critique close -r <id>`

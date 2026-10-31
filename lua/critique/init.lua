@@ -91,13 +91,14 @@ local function thread_line(buf, t, path, side)
   return lnum and math.min(lnum, vim.api.nvim_buf_line_count(buf))
 end
 
--- "#2 (3) · outdated · alice: Why + 0? · ⏳ claude is on it": the thread at a glance, inline and in :Critique threads.
+-- "#2 (3) · ⏳ claude is on it · outdated · alice: Why + 0?": the thread at a glance, inline and in :Critique threads.
+-- The state goes first: a long line or a narrow window cuts off the end.
 local function thread_summary(t)
   local c = t.comments[1]
   local count = (t.n and ('#%d '):format(t.n) or '') .. ('(%d)'):format(#t.comments)
   local state = t.ack and (' · ⏳ ' .. t.ack .. ' is on it') or t.sent and ' · sent' or ''
   local text = c.body:match('^`+suggestion') and '💡 suggested a change' or first_line(c.body)
-  return ('%s · %s%s: %s%s'):format(count, t.outdated and 'outdated · ' or '', login(c), text, state)
+  return ('%s%s · %s%s: %s'):format(count, state, t.outdated and 'outdated · ' or '', login(c), text)
 end
 
 local function is_pending(t)
