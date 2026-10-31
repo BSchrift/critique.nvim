@@ -1,5 +1,5 @@
 #!/bin/sh
-# Builds the small Go shop repo that demo/agent.tape reviews: demo/agent-setup.sh <dir>  →  <dir>/shop
+# Builds the small Go shop repo that demo/agent.tape and demo/live.tape review: demo/agent-setup.sh <dir>  →  <dir>/shop
 # It also gives Claude Code the critique skill and permission to run critique/go/git there.
 set -e
 plugin=$(cd "$(dirname "$0")/.." && pwd)

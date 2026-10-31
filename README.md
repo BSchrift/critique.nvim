@@ -13,7 +13,7 @@
 
 Code review in Neovim, for **your AI agent's changes** and for **GitHub pull requests**.
 
-![critique.nvim with Claude Code](demo/agent.gif)
+![A live review: Claude Code picks up each comment as you save it in Neovim](demo/live.gif)
 
 **[▸ Review GitHub pull requests](#review-github-pull-requests)** &nbsp;·&nbsp; **[▸ Review your AI agent's work](#review-your-ai-agents-changes)** &nbsp;·&nbsp; **[▸ Suggest by editing](#suggest-changes-by-editing-the-code)**
 
@@ -477,6 +477,7 @@ tests/run.sh               # every test, offline (unit tests, plus the CLI and N
 tests/run.sh cli local     # just some of them
 vhs demo/demo.tape         # re-record the GitHub demo (needs vhs; edit the PR URL first)
 vhs demo/agent.tape        # re-record the agent demo (needs vhs and Claude Code)
+vhs demo/live.tape         # re-record the top GIF, a live review (needs vhs and Claude Code)
 for t in demo/clips/*.tape; do vhs "$t"; done   # re-record the short clips (most stage a local review themselves)
 ```
 
