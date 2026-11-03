@@ -228,7 +228,8 @@ local OVERVIEW = 'critique://overview'
 
 -- Fills the overview page for the open review, fetched afresh.
 local function read_overview(buf)
-  vim.bo[buf].buftype, vim.bo[buf].swapfile, vim.bo[buf].filetype = 'nofile', false, 'markdown'
+  -- A normal buftype, like a file: picking a file in the list reuses only windows that show a normal buffer.
+  vim.bo[buf].buftype, vim.bo[buf].swapfile, vim.bo[buf].filetype = '', false, 'markdown'
   local function set(lines)
     vim.bo[buf].modifiable = true
     vim.api.nvim_buf_set_lines(buf, 0, -1, false, lines)

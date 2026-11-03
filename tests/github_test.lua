@@ -636,6 +636,16 @@ H.test('a PR opens on its overview page, first in its file list; :cnext goes on 
   vim.cmd.cprevious()
   H.eq(vim.api.nvim_buf_get_name(0), 'critique://overview', 'back to it, like a file')
 end)
+H.test('picking a file in the list opens it in place of the overview, like any file', function()
+  open()
+  local page, wins = vim.api.nvim_get_current_win(), #vim.api.nvim_tabpage_list_wins(0)
+  vim.cmd('copen')
+  vim.api.nvim_win_set_cursor(0, { 2, 0 }) -- a.txt
+  vim.cmd('.cc') -- what <CR> does in the list
+  H.eq(vim.api.nvim_get_current_win(), page, 'no new split')
+  H.eq(#vim.api.nvim_tabpage_list_wins(0), wins)
+  H.eq(vim.fn.fnamemodify(vim.api.nvim_buf_get_name(0), ':t'), 'a.txt')
+end)
 H.test(':Critique overview goes there from anywhere, fetched afresh', function()
   overview = bare_overview('Before')
   open()

@@ -13,6 +13,8 @@ lazy.nvim, `version = '*'` follows them.
 
 ### Fixed
 
+- Picking a file in the file list while the overview shows opens the file in that window, like any
+  file, instead of in a new split.
 - Live reviews: the skill tells the agent to run `critique ack` on its own before it starts a fix, so
   ⏳ shows on the thread while it works (it could run it with the fix, and ⏳ never showed).
 
