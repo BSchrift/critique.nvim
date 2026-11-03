@@ -16,15 +16,18 @@ vim.api.nvim_echo = function(chunks) table.insert(echoes, chunks[1][1]) end
 
 -- A PR's repo: main is its base, and the pr branch its head, which GitHub also has as refs/pull/<n>/head.
 local origins = {}
-local function pr_repo(name, n)
-  local repo = H.repo({ ['a.txt'] = { 'one', 'two', 'three' }, ['b.txt'] = { 'bee' } })
+local function pr_repo(name, n, a) -- a: a.txt's lines in the base, of which the PR changes line 2
+  a = a or { 'one', 'two', 'three' }
+  local repo = H.repo({ ['a.txt'] = a, ['b.txt'] = { 'bee' } })
   for i = 1, 3 do -- some history, which opening a PR shouldn't download
     H.write(repo, 'history.txt', { tostring(i) })
     H.git(repo, 'add', '-A')
     H.git(repo, 'commit', '-qm', 'history ' .. i)
   end
   H.git(repo, 'checkout', '-q', '-b', 'pr')
-  H.write(repo, 'a.txt', { 'one', 'TWO', 'three' })
+  local head = vim.list_slice(a)
+  head[2] = 'TWO'
+  H.write(repo, 'a.txt', head)
   H.git(repo, 'commit', '-qam', 'first')
   H.git(repo, 'update-ref', ('refs/pull/%d/head'):format(n), 'pr')
   -- Let fetches ask for commits by id and leave out file contents, as GitHub does.
@@ -78,7 +81,7 @@ gh.gql = function(_, query, vars)
   assert(query:find('reviewThreads'), 'unexpected query')
   pages = pages + 1
   local repo = origins[vars.name]
-  return { repository = { pullRequest = {
+  return { viewer = { login = 'me' }, repository = { pullRequest = {
     id = 'PR_' .. vars.number, title = 'Change two', headRefOid = H.git(repo, 'rev-parse', 'pr'), baseRefOid = H.git(repo, 'rev-parse', 'main'),
     reviews = { nodes = {} }, files = page(files, vars.files), reviewThreads = page(vim.deepcopy(threads), vars.reviewThreads),
     submitted = { nodes = reviewed and { { viewerDidAuthor = true, commit = { oid = reviewed } } } or {} },
@@ -101,6 +104,13 @@ local function last_sent(name)
   end
 end
 
+-- Runs a :Critique command and returns the message it ends with.
+local function run(cmd)
+  local before = #messages
+  vim.cmd(cmd)
+  H.wait_for(function() return #messages > before end, cmd)
+  return messages[#messages].msg
+end
 -- Opens the PR (PR 7 unless given), with `with_threads` as its review threads on "GitHub".
 local function open(with_threads, url)
   threads = with_threads or {}
@@ -509,6 +519,130 @@ H.test('y posts before you can type again: the file is back as it was, and a sec
   H.eq(vim.tbl_map(function(m) return m[1] end, vim.list_slice(sent, count + 1)), { 'addPullRequestReview', 'addPullRequestReviewThread' })
 end)
 
+H.section('outside the diff')
+-- PR 9 changes line 2 of a 10-line a.txt, so its diff is lines 1-5. b.txt and history.txt aren't in it.
+local origin9 = pr_repo('t', 9, { 'one', 'two', 'three', 'four', 'five', 'six', 'seven', 'eight', 'nine', 'ten' })
+H.git(H.tmp, 'config', '--global', 'url.file://' .. origin9 .. '.insteadOf', 'https://github.example/o/t.git')
+local URL9, checkout9 = 'https://github.example/o/t/pull/9', vim.fn.stdpath('cache') .. '/critique/github.example/o/t/pr-9'
+local head9 = H.git(origin9, 'rev-parse', 'pr')
+local notes9 = checkout9 .. '-notes.json' -- your notes, until you submit
+local function read_notes() return vim.json.decode(table.concat(vim.fn.readfile(notes9), '\n')) end
+local function link9(path, lines, sha) return ('https://github.example/o/t/blob/%s/%s#%s'):format(sha or head9, path, lines) end
+local function on_line9(path, n)
+  vim.cmd.edit(checkout9 .. '/' .. path)
+  vim.api.nvim_win_set_cursor(0, { n, 0 })
+end
+local function labels() -- the thread labels in this buffer: { line, text }
+  return vim.tbl_map(function(m) return { m[2] + 1, m[4].virt_text[1][1] } end,
+    vim.api.nvim_buf_get_extmarks(0, vim.api.nvim_create_namespace('critique.threads'), 0, -1, { details = true }))
+end
+-- Edits line n of path to `text`, :w, and checks what the suggestion window says, then posts with y.
+local function suggest_edit(path, n, text, says)
+  on_line9(path, n)
+  vim.api.nvim_buf_set_lines(0, n - 1, n, false, { text })
+  vim.cmd('write')
+  H.wait_for(float_open, 'the suggestion window')
+  H.has(table.concat(vim.api.nvim_buf_get_lines(0, 0, -1, false), '\n'), says)
+  local before = #messages
+  vim.api.nvim_feedkeys('y', 'x', false)
+  H.wait_for(function() return #messages > before end, 'the post')
+end
+local function file_thread(id, body, mine) -- GitHub gives a comment on a file line 1
+  return { id = 'T_' .. id, isResolved = false, isOutdated = false, path = 'a.txt', subjectType = 'FILE', line = 1, originalLine = 1,
+    diffSide = 'RIGHT', comments = { nodes = {
+    { id = 'C_' .. id, databaseId = id, body = body, state = mine and 'PENDING' or 'SUBMITTED', viewerDidAuthor = mine or false,
+      author = { login = mine and 'me' or 'amy' } },
+  } } }
+end
+
+H.test('a comment outside the diff goes on the file, starting with a link to its lines', function()
+  open(nil, URL9)
+  on_line9('a.txt', 8)
+  vim.cmd('Critique comment')
+  type_comment('Rename this?')
+  local before = #messages
+  vim.cmd('write')
+  H.wait_for(function() return #messages > before end, 'the save')
+  H.eq(last_sent('addPullRequestReviewThread'), { path = 'a.txt', subjectType = 'FILE', pullRequestReviewId = 'R_1',
+    body = link9('a.txt', 'L8') .. '\n\nRename this?' .. FOOTER })
+  write_comment('Rename this, please?')
+  H.eq(last_sent('updatePullRequestReviewComment').body, link9('a.txt', 'L8') .. '\n\nRename this, please?' .. FOOTER,
+    'saving again keeps the link')
+  vim.cmd('7,8Critique comment')
+  write_comment('And these')
+  H.eq(last_sent('addPullRequestReviewThread').body, link9('a.txt', 'L7-L8') .. '\n\nAnd these' .. FOOTER)
+end)
+H.test('a file comment shows on the lines it links to; from older commits, as outdated; with no link, on line 1', function()
+  open({ file_thread(1, link9('a.txt', 'L8') .. '\n\nRename this?'), file_thread(2, link9('a.txt', 'L9', ('0'):rep(40)) .. '\n\nOld'),
+    file_thread(3, 'About the whole file'), file_thread(4, link9('a.txt', 'L6') .. '\n\nMine' .. FOOTER, true) }, URL9)
+  on_line9('a.txt', 8)
+  H.eq(labels(), { { 1, ' 💬 (1) · amy: About the whole file' }, { 6, ' 💬 (1) · me: Mine' }, { 8, ' 💬 (1) · amy: Rename this?' },
+    { 9, ' 💬 (1) · outdated · amy: Old' } })
+  vim.cmd('Critique comment')
+  H.has(table.concat(vim.api.nvim_buf_get_lines(0, 0, -1, false), '\n'), '<!-- @amy -->\nRename this?\n', 'shown without its link')
+  vim.cmd('quit!')
+  on_line9('a.txt', 6)
+  vim.cmd('Critique comment')
+  H.eq(below_mark(), { 'Mine' })
+  write_comment('Mine, edited')
+  H.eq(last_sent('updatePullRequestReviewComment'), { pullRequestReviewCommentId = 'C_4',
+    body = link9('a.txt', 'L6') .. '\n\nMine, edited' .. FOOTER }, 'editing keeps the link')
+end)
+H.test('an edit outside the diff posts as a diff on the file; in a file outside the PR, as a note in your summary', function()
+  open(nil, URL9)
+  suggest_edit('a.txt', 8, 'EIGHT', 'a.txt:8 · outside the diff: a comment on the file, applied by hand')
+  H.eq(last_sent('addPullRequestReviewThread'), { path = 'a.txt', subjectType = 'FILE', pullRequestReviewId = 'R_1',
+    body = link9('a.txt', 'L8') .. '\n\n```diff\n-eight\n+EIGHT\n```' .. FOOTER })
+  local count = #sent
+  suggest_edit('b.txt', 1, 'BEE', 'b.txt:1 · not in this PR: a note in your review summary, applied by hand')
+  H.eq(#sent, count, 'nothing goes to GitHub until you submit')
+  H.eq(read_notes(), { { link = link9('b.txt', 'L1'), text = '```diff\n-bee\n+BEE\n```' } })
+  H.eq({ vim.api.nvim_buf_get_lines(0, 0, -1, false), labels() }, { { 'bee' }, { { 1, ' 💬 (1) · me: 💡 suggested a change' } } },
+    'the file is back as it was, and the note shows on its line')
+  H.ok(vim.iter(vim.fn.getqflist()):any(function(i) return vim.api.nvim_buf_get_name(i.bufnr):find('/b%.txt$') and i.text == '1 thread' end),
+    'b.txt is in the file list')
+end)
+H.test('your notes show on their lines; you can edit and delete them, and they go out with your summary', function()
+  vim.fn.writefile({ vim.json.encode({ { link = link9('b.txt', 'L1'), text = 'On bee' },
+    { link = link9('history.txt', 'L1'), text = 'On history' } }) }, notes9)
+  open(nil, URL9)
+  on_line9('b.txt', 1)
+  H.eq(labels(), { { 1, ' 💬 (1) · me: On bee' } })
+  H.has(run('Critique resolve'), "that's a note in your review summary, not a thread: :Critique delete removes it")
+  vim.cmd('Critique comment')
+  H.eq(below_mark(), { 'On bee' })
+  write_comment('On bee, edited')
+  H.eq(vim.tbl_map(function(n) return n.text end, read_notes()), { 'On bee, edited', 'On history' })
+  local select, input, prompt = vim.ui.select, vim.ui.input, nil
+  vim.ui.select = function(items, _, cb) cb(items[1]) end
+  vim.ui.input = function(opts, cb) prompt = opts.prompt cb('Thanks') end
+  local ok, err = pcall(function()
+    on_line9('history.txt', 1)
+    H.eq(run('Critique delete'), 'critique: comment deleted')
+    H.eq(vim.tbl_map(function(n) return n.text end, read_notes()), { 'On bee, edited' })
+    H.eq(labels(), {})
+    run('Critique submit')
+  end)
+  vim.ui.select, vim.ui.input = select, input
+  assert(ok, err)
+  H.eq(prompt, 'Summary (optional; your notes on files outside the PR follow it): ')
+  H.eq(last_sent('addPullRequestReview').body, 'Thanks\n\n' .. link9('b.txt', 'L1') .. '\n\nOn bee, edited' .. FOOTER)
+  H.eq(vim.fn.filereadable(notes9), 0, 'sent, so gone')
+end)
+-- Last: it pushes to PR 9.
+H.test('a comment outside the diff started before new commits asks to go where its code is now, on the file', function()
+  open(nil, URL9)
+  on_line9('a.txt', 8)
+  vim.cmd('Critique comment')
+  type_comment('On eight')
+  push(origin9, 9, { 'zero', 'one', 'TWO', 'three', 'four', 'five', 'six', 'seven', 'eight', 'nine', 'ten' })
+  open_beside(URL9)
+  local asked = answering(1, function() write_comment('On eight') end)
+  H.eq(asked, { 'PR #9 has new commits since you started this comment. Post it on line 9, where that code is now '
+    .. '(outside the diff: a comment on the file)?' })
+  H.eq(last_sent('addPullRequestReviewThread').body, link9('a.txt', 'L9', H.git(origin9, 'rev-parse', 'pr')) .. '\n\nOn eight' .. FOOTER)
+end)
+
 H.section('big PRs')
 H.test('every thread and viewed mark arrives, past the first 100', function()
   local many = {}
@@ -541,13 +675,6 @@ local function mine(id, resolved) -- a thread on a.txt:3 with your pending comme
   return { id = 'T_' .. id, isResolved = resolved or false, isOutdated = false, path = 'a.txt', line = 3, diffSide = 'RIGHT', comments = { nodes = {
     { id = 'C_' .. id, databaseId = id, body = 'Mine', state = 'PENDING', viewerDidAuthor = true, author = { login = 'me' } },
   } } }
-end
--- Runs a :Critique command and returns the message it ends with.
-local function run(cmd)
-  local before = #messages
-  vim.cmd(cmd)
-  H.wait_for(function() return #messages > before end, cmd)
-  return messages[#messages].msg
 end
 H.test('a link to a line, a file, or a comment opens there', function()
   local hash = vim.fn.sha256('a.txt')

@@ -97,7 +97,7 @@ local function thread_summary(t)
   local c = t.comments[1]
   local count = (t.n and ('#%d '):format(t.n) or '') .. ('(%d)'):format(#t.comments)
   local state = t.ack and (' · ⏳ ' .. t.ack .. ' is on it') or t.sent and ' · sent' or ''
-  local text = c.body:match('^`+suggestion') and '💡 suggested a change' or first_line(c.body)
+  local text = (c.body:match('^`+suggestion') or c.body:match('^`+diff')) and '💡 suggested a change' or first_line(c.body)
   return ('%s%s · %s%s: %s'):format(count, state, t.outdated and 'outdated · ' or '', login(c), text)
 end
 
@@ -267,9 +267,9 @@ local function set_qf(reset)
         text = (({ viewed = '✓ ', changed = '● ' })[S.viewed[f.path]] or '') .. ('%s  +%d -%d'):format(f.status, f.adds, f.dels),
       }
     end, (S.since or S).files)
-    -- Local reviews can have threads on files outside the diff; list those too.
+    -- Threads on files outside the diff (local reviews; on GitHub, your summary's notes): list those too.
     local extra = {}
-    for _, t in ipairs(S.review and S.threads or {}) do
+    for _, t in ipairs(S.threads) do
       if not S.by_path[t.path] then
         extra[t.path] = extra[t.path] or { filename = S.dir .. '/' .. t.path, lnum = t.line, count = 0 }
         extra[t.path].count = extra[t.path].count + 1
@@ -324,6 +324,26 @@ local function post(ctx, body)
   return S.backend.post(S, ctx, body)
 end
 
+-- Where a comment on lines first..last goes. GitHub takes comments on lines only inside one diff hunk; elsewhere it
+-- goes on the file if the PR changes it, or else into your review summary (github.lua links them to their lines).
+-- Nil on the base version outside the diff.
+local function anchor(path, side, first, last)
+  local multi = first < last
+  local a = { path = path, side = side, line = last, startLine = multi and first or nil, startSide = multi and side or nil }
+  local file = S.by_path[path]
+  local h = file and diff.hunk_of(file, first, side)
+  if S.review or h and h == diff.hunk_of(file, last, side) then return a end
+  if side == 'LEFT' then return end
+  a.startSide = nil
+  if file then a.subjectType = 'FILE' else a.note = true end
+  return a
+end
+
+-- What a comment outside the diff becomes, for the questions that post it.
+local function outside(a)
+  return a.subjectType and 'outside the diff: a comment on the file' or a.note and "not in this PR: a note in your review summary"
+end
+
 -- A new comment started before you reopened its PR at new commits: its line is in the version you saw then. Finds
 -- that code in the new version and asks to post the comment there; raises if it can't, so your text stays open.
 -- (GitHub puts a new thread on the PR's latest commit, even in a pending review begun on an older one.)
@@ -341,13 +361,13 @@ local function move_to_new_commits(ctx)
     cannot('its base changed')
   end
   local first = line - (a.line - (a.startLine or a.line))
-  local file = S.by_path[a.path]
-  local h = file and diff.hunk_of(file, first, a.side)
-  if not h or h ~= diff.hunk_of(file, line, a.side) then cannot("that code isn't among its changes any more") end
+  local moved = anchor(a.path, a.side, first, line)
+  if not moved then cannot("that code isn't among its changes any more") end
   local where = first == line and ('line %d'):format(line) or ('lines %d-%d'):format(first, line)
-  local ask = ('PR #%d has new commits since you started this comment. Post it on %s, where that code is now?'):format(S.number, where)
+  local ask = ('PR #%d has new commits since you started this comment. Post it on %s, where that code is now%s?')
+    :format(S.number, where, outside(moved) and (' (' .. outside(moved) .. ')') or '')
   if vim.fn.confirm(ask, '&Yes\n&No', 1) ~= 1 then error('not posted; your comment is still open', 0) end
-  a.line, a.startLine, ctx.review = line, a.startLine and first, S
+  ctx.anchor, ctx.review = moved, S
 end
 
 local function save(buf, ctx)
@@ -410,7 +430,6 @@ end
 local function edits(buf, path)
   local old = store.read_lines(S.dir .. '/' .. path) or {}
   local new = vim.api.nvim_buf_get_lines(buf, 0, -1, false)
-  local file = S.by_path[path]
   return vim.tbl_map(function(h)
     local sa, ca, sb, cb = unpack(h)
     local e = { hunk = h, orig = vim.list_slice(old, sa, sa + ca - 1), lines = vim.list_slice(new, sb, sb + cb - 1), first = sa, show = {} }
@@ -424,29 +443,29 @@ local function edits(buf, path)
     end
     e.last = math.max(e.first, sa + ca - 1)
     e.code = vim.list_slice(old, e.first, e.last)
-    local h1 = file and diff.hunk_of(file, e.first, 'RIGHT')
-    e.ok = #old > 0 and (S.review ~= nil or (h1 ~= nil and h1 == diff.hunk_of(file, e.last, 'RIGHT')))
+    e.anchor = #old > 0 and anchor(path, 'RIGHT', e.first, e.last) or nil
     return e
   end, diff.text(table.concat(old, '\n') .. '\n', table.concat(new, '\n') .. '\n', { result_type = 'indices' }))
 end
 
-local function suggestion_body(lines)
+-- A suggestion, or outside the diff, where GitHub has none, a diff of the edit to apply by hand.
+local function suggestion_body(e)
+  local kind = outside(e.anchor) and 'diff' or 'suggestion'
+  local lines = kind == 'diff' and vim.tbl_map(function(l) return l:sub(1, 1) .. l:sub(3) end, e.show) or e.lines -- '- old': '-old'
   local fence = 3 -- longer than any run of backticks in the code, so the code can't end the block
   for _, l in ipairs(lines) do
     for run in l:gmatch('`+') do fence = math.max(fence, #run + 1) end
   end
   fence = ('`'):rep(fence)
-  return fence .. 'suggestion\n' .. table.concat(vim.list_extend(vim.list_slice(lines), { fence }), '\n')
+  return fence .. kind .. '\n' .. table.concat(vim.list_extend(vim.list_slice(lines), { fence }), '\n')
 end
 
 -- Posts the edits that can be suggestions, like comments, and takes them out of the buffer; the rest stay.
 local function post_suggestions(buf, path, list)
   local posted, shift = 0, 0
   for _, e in ipairs(list) do
-    if e.ok then
-      local multi = e.first < e.last
-      post({ code = e.code, anchor = { path = path, side = 'RIGHT', line = e.last, startLine = multi and e.first or nil,
-        startSide = multi and 'RIGHT' or nil } }, suggestion_body(e.lines))
+    if e.anchor then
+      post({ code = e.code, anchor = e.anchor }, suggestion_body(e))
       posted = posted + 1
       local _, _, sb, cb = unpack(e.hunk) -- put back the file's lines; `shift` keeps later blocks' line numbers right
       local from = (cb > 0 and sb - 1 or sb) + shift
@@ -476,12 +495,13 @@ local function suggest(buf)
     vim.bo[buf].modified = false -- edited back to what's on disk
     return notify('no edits to suggest in ' .. path)
   end
-  local ok = #vim.tbl_filter(function(e) return e.ok end, list)
+  local ok = #vim.tbl_filter(function(e) return e.anchor end, list)
   local lines = {}
   for _, e in ipairs(list) do
     if #lines > 0 then table.insert(lines, '') end
     table.insert(lines, ('%s:%s%s'):format(path, e.first == e.last and e.first or (e.first .. '-' .. e.last),
-      e.ok and '' or " · can't suggest here: not in the PR's diff (stays in the file)"))
+      not e.anchor and " · can't suggest here: the file is new or empty (stays in the file)"
+      or outside(e.anchor) and (' · %s, applied by hand'):format(outside(e.anchor)) or ''))
     vim.list_extend(lines, e.show)
   end
   local fbuf = vim.api.nvim_create_buf(false, true)
@@ -728,16 +748,9 @@ function cmds.comment(o)
       return t and edit({ thread = t })
     end
   end
-  local file = S.by_path[path]
-  local h = file and diff.hunk_of(file, o.line1, side)
-  if not S.review and (not h or h ~= diff.hunk_of(file, o.line2, side)) then
-    error('GitHub only accepts comments on lines inside one diff hunk', 0)
-  end
-  local multi = o.line1 < o.line2
-  edit({ code = vim.api.nvim_buf_get_lines(0, o.line1 - 1, o.line2, false), anchor = {
-    path = path, side = side, line = o.line2,
-    startLine = multi and o.line1 or nil, startSide = multi and side or nil,
-  } })
+  local a = anchor(path, side, o.line1, o.line2)
+  if not a then error("outside the diff, comment on the PR's version of the file (:Critique after)", 0) end
+  edit({ code = vim.api.nvim_buf_get_lines(0, o.line1 - 1, o.line2, false), anchor = a })
 end
 
 function cmds.delete()

@@ -36,6 +36,7 @@ Code review in Neovim, for **your AI agent's changes** and for **GitHub pull req
 Change the code right in the file, the way you'd fix it yourself, and `:w`. Nothing is written to disk:
 critique shows your edits as suggestions, and `y` posts them. On a GitHub PR, the author commits a
 suggestion with one click; an agent applies it as written. `:Critique suggest` does the same without `:w`.
+You can edit any file, not just the PR's changes ([outside the diff](#outside-the-diff)).
 
 ## Features
 
@@ -43,7 +44,7 @@ suggestion with one click; an agent applies it as written. `:Critique suggest` d
 - GitHub-style diff drawn over the real files: green additions, red deleted lines shown as virtual
   lines, and the changed words inside a line highlighted. The buffer is always the real file, so your
   LSP, telescope, `gd`, grep, and formatters keep working in changed files and the rest of the repo.
-- Line numbers you can comment on are tinted gray-blue. `]c` / `[c` jump between changes, and the
+- Line numbers in the diff are tinted gray-blue. `]c` / `[c` jump between changes, and the
   changed files are in the quickfix list.
 - Comment on a line or a visual range in a markdown buffer. Read and reply to threads, edit your
   drafts, resolve, delete. Threads show inline at the end of their line, with their number (`#2`).
@@ -82,6 +83,8 @@ suggestion with one click; an agent applies it as written. `:Critique suggest` d
 - Comments go to a pending GitHub review as you save them. Submit as Comment, Approve, or Request changes.
   Each one ends with a small "Made with critique.nvim" link, with the logo as its c (`footer = false` turns it off).
 - Read and reply to other reviewers' threads, and resolve them.
+- Comment on or edit any line of any file, even outside the diff, where GitHub takes no line comments:
+  it becomes a comment on the file, or a note in your review summary ([outside the diff](#outside-the-diff)).
 - `:Critique link` copies a permalink to the current line or range.
 - Private repos and GitHub Enterprise work through your existing `gh` login, with no extra setup.
 - Opening a PR downloads only what the review needs: the PR's commits without the repo's history, and its
@@ -372,8 +375,21 @@ vim.keymap.set('n', '<leader>cs', '<cmd>Critique submit<cr>', { desc = 'Critique
 | `:Critique live` | Local: turn live mode on or off (comments go to the agent as you save them) |
 | `:Critique help` | Open the help (`:help critique`) |
 
-On GitHub, you can comment only on lines inside a diff hunk: changed lines plus 3 lines of context
-around them. Their line numbers are tinted gray-blue. Local reviews have no such limit.
+### Outside the diff
+
+On GitHub, comments and suggestions go on their lines only inside the diff: changed lines plus 3 lines
+of context around them, whose line numbers are tinted gray-blue. You can still comment on, or edit, any
+other line of any file:
+
+- **In a file the PR changes,** it becomes a comment on the file.
+- **In a file the PR doesn't change,** it becomes a note in your review summary, which goes out when you
+  `:Critique submit`. Until then it waits on your computer, and you can edit or delete it like a comment.
+  A review you submit on github.com leaves it out.
+
+Both start with a link to the lines, which GitHub shows as a snippet of the code. An edit there is a
+diff that the author applies by hand: GitHub's "Commit suggestion" works only inside the diff. In
+Neovim, both show on their lines like any thread (after new commits, where they were, marked outdated).
+Local reviews have no such limit.
 
 Full documentation is in Neovim: `:help critique` (or `:Critique help`). `critique -h` covers the shell command.
 
@@ -419,7 +435,7 @@ clipboard provider, it goes to the unnamed register only, so `p` pastes it.
 |---|---|
 | Something isn't working | Run `:checkhealth critique` first: it checks your setup and says what to fix. |
 | `To get started with GitHub CLI, please run: gh auth login` | Run `gh auth login`. The `critique` launcher offers to do this for you. |
-| `GitHub only accepts comments on lines inside one diff hunk` | Comment on a changed line or within 3 lines of one. For deleted lines, use `:Critique before`. |
+| `outside the diff, comment on the PR's version of the file` | In `:Critique before`, only lines in the diff take comments. Elsewhere, `:Critique after` and comment there ([outside the diff](#outside-the-diff)). |
 | `save or undo your edits first` | Comments are placed by line number, so the buffer must match the file. `:w` to post your edits as suggestions, or undo (`u`, `:e!`). |
 | `:w` doesn't save the file | By design: `:w` in a review offers your edits as suggestions. In a local review, `:w!` writes the file. Set `auto_suggest = false` to make `:w` save as usual. |
 | The suggestion window pops up while I type | An auto-save plugin is saving on every change. Set `auto_suggest = false` and use `:Critique suggest`. |

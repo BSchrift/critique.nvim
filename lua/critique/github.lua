@@ -21,6 +21,7 @@ end
 -- shortcut: 100 comments per thread, and your last review among the last 100; paginate if PRs outgrow that.
 local PR_QUERY = [[
 query($owner: String!, $name: String!, $number: Int!, $files: String, $reviewThreads: String) {
+  viewer { login }
   repository(owner: $owner, name: $name) {
     pullRequest(number: $number) {
       id title headRefOid baseRefOid
@@ -29,7 +30,7 @@ query($owner: String!, $name: String!, $number: Int!, $files: String, $reviewThr
       files(first: 100, after: $files) { nodes { path viewerViewedState } pageInfo { hasNextPage endCursor } }
       reviewThreads(first: 100, after: $reviewThreads) {
         nodes {
-          id isResolved isOutdated path line originalLine diffSide
+          id isResolved isOutdated path line originalLine diffSide subjectType
           comments(first: 100) { nodes { id databaseId body state viewerDidAuthor author { login } } }
         }
         pageInfo { hasNextPage endCursor }
@@ -75,11 +76,38 @@ function progress.set(step) progress.step, progress.detail = step, nil end
 function progress.show(detail) progress.detail = detail end
 function progress.stop() progress.timer = nil end
 
+-- GitHub takes comments on lines only inside the diff. critique posts one elsewhere starting with a permalink to its
+-- lines (GitHub shows it as a snippet): on a file the PR changes as a comment on the file, else as a note in your
+-- review summary. Returns where a body's leading permalink points ({ sha, path, first, last, link }) and the rest.
+local function linked(st, body)
+  local link, rest = body:gsub('\r', ''):match('^([^\n]*)\n*(.*)$')
+  local prefix = ('https://%s/%s/%s/blob/'):format(st.host, st.owner, st.name)
+  if link:sub(1, #prefix) ~= prefix then return end
+  local sha, path, first, last = link:sub(#prefix + 1):match('^(%x+)/(.+)#L(%d+)%-?L?(%d*)$')
+  if not sha then return end
+  path = path:gsub('%%(%x%x)', function(h) return string.char(tonumber(h, 16)) end)
+  return { sha = sha, path = path, first = tonumber(first), last = tonumber(last) or tonumber(first), link = link }, rest
+end
+
+-- Your notes on files outside the PR ({ link, text }), for your review summary. They wait in a file next to the PR's
+-- checkout until you submit: GitHub can't add a summary to a pending review that was started without one.
+local function notes(st)
+  if vim.fn.filereadable(st.notes) == 0 then return {} end
+  local ok, list = pcall(vim.json.decode, table.concat(vim.fn.readfile(st.notes), '\n'))
+  return ok and type(list) == 'table' and list or {}
+end
+local function save_notes(st, list)
+  if #list == 0 then return vim.fn.delete(st.notes) end
+  if vim.fn.writefile({ vim.json.encode(list) }, st.notes) ~= 0 then error("can't save your notes to " .. st.notes, 0) end
+end
+
 -- The PR's threads, viewed marks, and your pending and last reviews, into st (the review's state).
 function M.load(st)
   local vars, more, pr = { owner = st.owner, name = st.name, number = st.number }, { files = true, reviewThreads = true }, nil
   while next(more) do -- the next page of each list that has one; a finished list is asked for after its end (empty)
-    local page = gh.gql(st.host, PR_QUERY, vars).repository.pullRequest
+    local data = gh.gql(st.host, PR_QUERY, vars)
+    st.me = data.viewer.login
+    local page = data.repository.pullRequest
     pr = pr or vim.tbl_extend('force', page, { files = { nodes = {} }, reviewThreads = { nodes = {} } })
     for key in pairs(more) do
       vim.list_extend(pr[key].nodes, page[key].nodes)
@@ -93,12 +121,30 @@ function M.load(st)
   for _, r in ipairs(pr.submitted.nodes) do
     if r.viewerDidAuthor and r.commit then st.reviewed = r.commit.oid end -- your last review's commit, for :Critique since
   end
+  local head = st.head or pr.headRefOid -- the version you're looking at
   st.threads = vim.tbl_map(function(t)
     t.comments, t.outdated = t.comments.nodes, t.isOutdated
     for _, c in ipairs(t.comments) do c.body = unsigned(c.body) end
     t.line = t.line or t.originalLine -- an outdated thread stays where its code was, as in local reviews
+    if t.subjectType == 'FILE' then -- shows on the lines it links to, or else on line 1
+      local c = t.comments[1]
+      local at, rest = linked(st, c.body)
+      if at and at.path == t.path then
+        c.body, c.link, t.line, t.outdated = rest, at.link, at.last, t.outdated or at.sha ~= head
+      end
+      t.line, t.diffSide = t.line or 1, 'RIGHT'
+    end
     return t
   end, pr.reviewThreads.nodes)
+  -- Your notes show on their lines like threads; you can edit or delete them until you submit.
+  for i, n in ipairs(notes(st)) do
+    local at = linked(st, n.link)
+    if at then
+      local c = { id = 'note:' .. i, note = i, body = n.text, state = 'PENDING', viewerDidAuthor = true, author = { login = st.me } }
+      table.insert(st.threads, { id = c.id, note = i, path = at.path, line = at.last, diffSide = 'RIGHT', isResolved = false,
+        outdated = at.sha ~= head, comments = { c } })
+    end
+  end
   return pr
 end
 
@@ -145,25 +191,48 @@ local function ensure_review(st)
 end
 
 -- Saves a comment to your pending review: an edit of ctx.comment, a reply in ctx.thread, or a new thread at ctx.anchor.
+-- An anchor outside the diff (init.lua) is a comment on the file (subjectType FILE) or a note in your summary (note).
 function M.post(st, ctx, body)
-  if ctx.comment then
-    gh.mutate(st.host, 'updatePullRequestReviewComment', { pullRequestReviewCommentId = ctx.comment.id, body = signed(body) })
+  local c, a = ctx.comment, ctx.anchor
+  if c and c.note then
+    local list = notes(st)
+    if not list[c.note] then error('that note is gone from your review summary', 0) end
+    list[c.note].text = body
+    save_notes(st, list)
+  elseif c then
+    body = c.link and (c.link .. '\n\n' .. body) or body
+    gh.mutate(st.host, 'updatePullRequestReviewComment', { pullRequestReviewCommentId = c.id, body = signed(body) })
   elseif ctx.thread then
     local input = { pullRequestReviewThreadId = ctx.thread.id, pullRequestReviewId = ensure_review(st), body = signed(body) }
     ctx.comment = gh.mutate(st.host, 'addPullRequestReviewThreadReply', input, 'comment { id }').comment
-  else
-    local input = vim.tbl_extend('force', ctx.anchor, { pullRequestReviewId = ensure_review(st), body = signed(body) })
+  else -- new, and saving it again edits it: so the comment remembers its note, or its link
+    local link = (a.note or a.subjectType == 'FILE') and M.permalink(st, a.path, 'RIGHT', a.startLine or a.line, a.line)
+    if a.note then
+      local list = notes(st)
+      table.insert(list, { link = link, text = body })
+      save_notes(st, list)
+      ctx.comment = { note = #list }
+      return
+    end
+    local input = link and { path = a.path, subjectType = 'FILE' } or a
+    input = vim.tbl_extend('force', input, { pullRequestReviewId = ensure_review(st), body = signed(link and (link .. '\n\n' .. body) or body) })
     local t = gh.mutate(st.host, 'addPullRequestReviewThread', input, 'thread { id comments(first: 1) { nodes { id } } }').thread
     if not t then error('GitHub rejected the comment', 0) end
-    ctx.comment = t.comments.nodes[1]
+    ctx.comment = vim.tbl_extend('force', t.comments.nodes[1], { link = link or nil })
   end
 end
 
 function M.delete(st, c)
+  if c.note then
+    local list = notes(st)
+    table.remove(list, c.note)
+    return save_notes(st, list)
+  end
   gh.mutate(st.host, 'deletePullRequestReviewComment', { id = c.id })
 end
 
 function M.resolve(st, t)
+  if t.note then error("that's a note in your review summary, not a thread: :Critique delete removes it", 0) end
   gh.mutate(st.host, t.isResolved and 'unresolveReviewThread' or 'resolveReviewThread', { threadId = t.id })
 end
 
@@ -179,14 +248,19 @@ function M.submit(st)
     format_item = function(e) return (e:lower():gsub('_', ' ')) end,
   })
   if not event then return end
-  local body = gh.await(vim.ui.input, { prompt = 'Summary (optional): ' })
+  local list = notes(st)
+  local body = gh.await(vim.ui.input, { prompt = #list > 0 and 'Summary (optional; your notes on files outside the PR follow it): '
+    or 'Summary (optional): ' })
   if not body then return end
+  for _, n in ipairs(list) do body = body .. '\n\n' .. n.link .. '\n\n' .. n.text end
+  body = vim.trim(body)
   body = body ~= '' and signed(body) or nil
   if st.review_id then
     gh.mutate(st.host, 'submitPullRequestReview', { pullRequestReviewId = st.review_id, event = event, body = body })
   else
     gh.mutate(st.host, 'addPullRequestReview', { pullRequestId = st.pr_id, commitOID = st.head, event = event, body = body })
   end
+  save_notes(st, {}) -- sent
   return true
 end
 
@@ -248,6 +322,7 @@ function M.open(host, owner, name, number)
   progress.start(('opening %s/%s#%s'):format(owner, name, number))
   local root = ('%s/critique/%s/%s/%s'):format(vim.fn.stdpath('cache'), host, owner, name)
   local git_dir, wt = root .. '/repo.git', root .. '/pr-' .. number
+  st.notes = wt .. '-notes.json'
   if not vim.uv.fs_stat(git_dir) then
     -- A repo of just the commits reviews need, without their history, and file contents only once they're used.
     -- gh supplies the credentials for private repos. Set up under another name, so a half-made one is never used.

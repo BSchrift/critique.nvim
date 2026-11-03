@@ -206,10 +206,18 @@ On GitHub, the comment ends with a small "Made with critique.nvim", the logo
 as its c (|critique-config| turns it off). critique hides it when it shows
 comments, so it is never in the buffer you edit.
 
-On GitHub PRs, you can only comment on lines inside a diff hunk: changed
-lines plus up to 3 lines of context around them. Their line numbers are
-tinted (|hl-CritiqueHunk|). Local reviews allow any line of any file. To
-comment on a deleted line, use `:Critique before`.
+On GitHub PRs, a comment goes on its lines only inside the diff: changed
+lines plus up to 3 lines of context around them, whose line numbers are
+tinted (|hl-CritiqueHunk|). Elsewhere it still works:
+- in a file the PR changes, it becomes a comment on the file
+- in a file the PR doesn't change, it becomes a note in your review summary,
+  sent with |:Critique-submit|; until then it waits on your computer, and
+  you can edit or delete it like a comment (submitting on github.com
+  leaves it out)
+Both start with a link to the lines, which GitHub shows as a snippet of the
+code. In Neovim they show on their lines like any thread; after new commits,
+where they were, marked outdated. Local reviews allow any line of any file.
+To comment on a deleted line, use `:Critique before`.
 
 Comments are placed by line number, so `:Critique comment` refuses while the
 buffer has unsaved edits.
@@ -261,7 +269,7 @@ group in your config, e.g. >lua
 *hl-CritiqueDelete*       Deleted lines
 *hl-CritiqueDeleteWord*   Changed words within deleted lines
 *hl-CritiqueDeleteSign*   The `-` sign (in `:Critique before`)
-*hl-CritiqueHunk*         Line numbers of lines you can comment on
+*hl-CritiqueHunk*         Line numbers of lines in the diff
 *hl-CritiqueThread*       Open threads
 *hl-CritiquePending*      Threads containing your pending comments
 *hl-CritiqueResolved*     Resolved threads
@@ -308,9 +316,9 @@ Start with `:checkhealth critique`: it checks your setup and says what to fix.
     Run `gh auth login`, or `gh auth login --hostname <host>` for a company
     GitHub.
 
-"GitHub only accepts comments on lines inside one diff hunk" ~
-    Comment on a line with a tinted number. For deleted lines, use
-    `:Critique before`.
+"outside the diff, comment on the PR's version of the file" ~
+    In `:Critique before`, only lines with a tinted number take comments.
+    Elsewhere, `:Critique after` and comment there.
 
 "save or undo your edits first" ~
     `:w` to post your edits as suggestions, or undo (`u`, `:e!`), so line
@@ -445,9 +453,10 @@ the lines it replaces. A deletion is an empty suggestion, and an insertion
 includes the line above it, since suggestions sit on existing lines. To add
 a note, `:Critique comment` on the thread afterwards.
 
-GitHub accepts suggestions only on lines in the PR's diff (the tinted line
-numbers). Edits elsewhere are listed as "can't suggest here" and stay in the
-file.
+GitHub has suggestions only on lines in the PR's diff (the tinted line
+numbers). An edit elsewhere is posted as a diff to apply by hand: a comment
+on the file, or a note in your review summary if the PR doesn't change the
+file (|critique-comments|). The window says which.
 
     :w!         GitHub: the same as `:w`; the PR's checkout is never written.
                 Local review: writes the file, i.e. you change the agent's

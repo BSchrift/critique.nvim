@@ -6,6 +6,14 @@ lazy.nvim, `version = '*'` follows them.
 
 ## [Unreleased]
 
+### Added
+
+- Comment on, or edit and `:w`, any line of a GitHub PR, even outside the diff, where GitHub takes no
+  line comments. In a file the PR changes it becomes a comment on the file; in any other file, a note in
+  your review summary that waits on your computer until you `:Critique submit`. Both start with a link to
+  the lines, which GitHub shows as a snippet, edits are a diff to apply by hand, and Neovim shows them on
+  their lines like any thread.
+
 ## [0.11.1] - 2026-11-02
 
 ### Changed
