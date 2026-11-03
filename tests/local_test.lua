@@ -819,14 +819,14 @@ H.test('cancelling the review picker opens nothing', function()
   local root, id = setup()
   H.start(root, { '--title', 'other' })
   reset()
-  vim.fn.setqflist({}, 'r')
   vim.api.nvim_set_current_dir(root)
   local select = vim.ui.select
   vim.ui.select = function(_, _, cb) cb(nil) end
   vim.cmd('Critique open')
   vim.wait(200)
   vim.ui.select = select
-  H.eq(vim.fn.getqflist(), {})
+  -- Not the quickfix list: the last test's review may still refresh it.
+  H.eq(vim.api.nvim_buf_get_name(0), '', 'still on the empty buffer')
 end)
 H.test('an empty submit summary is stored as no summary', function()
   local _, id, log = setup()
