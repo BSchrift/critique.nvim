@@ -6,6 +6,8 @@ lazy.nvim, `version = '*'` follows them.
 
 ## [Unreleased]
 
+## [0.11.1] - 2026-11-02
+
 ### Changed
 
 - A thread's label shows its state (`⏳ claude is on it`, `sent`) right after its number, before the
@@ -292,6 +294,7 @@ First release.
 - Live reviews: the agent picks up each comment as you save it.
 - `:help critique`, `:Critique help`, and `critique -h`.
 
+[0.11.1]: https://github.com/BSchrift/critique.nvim/compare/v0.11.0...v0.11.1
 [0.11.0]: https://github.com/BSchrift/critique.nvim/compare/v0.10.0...v0.11.0
 [0.10.0]: https://github.com/BSchrift/critique.nvim/compare/v0.9.0...v0.10.0
 [0.9.0]: https://github.com/BSchrift/critique.nvim/compare/v0.8.0...v0.9.0
